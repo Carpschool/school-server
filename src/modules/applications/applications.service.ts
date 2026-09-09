@@ -26,6 +26,9 @@ export class ApplicationsService {
   ): Promise<RiderApplication> {
     const user = await this.userModel.findOne({ centralUserId });
     if (!user) throw new BadRequestException('User not found');
+    if (user.role === 'driver') {
+      throw new BadRequestException('Only registered Riders can post carpool commute applications.');
+    }
     if (!user.isEduVerified) {
       throw new BadRequestException('You must verify your .edu email before posting a carpool application');
     }

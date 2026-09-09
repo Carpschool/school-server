@@ -38,6 +38,9 @@ export class MatchingService {
   ): Promise<any[]> {
     const driver = await this.userModel.findOne({ centralUserId });
     if (!driver) throw new BadRequestException('Driver not found');
+    if (driver.role !== 'driver' && !driver.userRoles?.includes('driver')) {
+      throw new BadRequestException('Only registered Drivers can search the commute corridor.');
+    }
     if (!driver.isEduVerified) {
       throw new BadRequestException('Driver must verify their institutional school email first.');
     }

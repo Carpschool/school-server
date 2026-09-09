@@ -13,6 +13,7 @@ describe('MatchingService', () => {
     _id: 'driver_01',
     centralUserId: 'usr_driver_bob',
     fullName: 'Bob Driver',
+    role: 'driver',
     isEduVerified: true,
     personalEmail: 'bob@gmail.com',
   };
@@ -66,6 +67,21 @@ describe('MatchingService', () => {
   });
 
   describe('findMatchingRiders', () => {
+    it('should reject if user is not a registered driver', async () => {
+      mockUserModel.findOne.mockResolvedValue({
+        ...mockDriverDoc,
+        role: 'rider',
+        userRoles: ['rider'],
+      });
+
+      await expect(
+        service.findMatchingRiders('usr_driver_bob', {
+          direction: CommuteDirection.HOME_TO_SCHOOL,
+          driverHomeId: 'home_01',
+        }),
+      ).rejects.toThrow('Only registered Drivers can search the commute corridor.');
+    });
+
     it('should reject if driver is not school .edu verified', async () => {
       mockUserModel.findOne.mockResolvedValue({
         ...mockDriverDoc,

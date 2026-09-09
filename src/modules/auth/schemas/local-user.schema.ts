@@ -30,6 +30,18 @@ export class LocalUser {
   @Prop({ default: null, sparse: true })
   personalEmail?: string;
 
+  /**
+   * Exclusive single role: an account can only be a 'rider' or 'driver'.
+   */
+  @Prop({ type: String, enum: ['rider', 'driver'], default: null })
+  role?: 'rider' | 'driver';
+
+  /**
+   * Flag indicating whether the student completed the onboarding flow.
+   */
+  @Prop({ default: false })
+  isOnboarded: boolean;
+
   @Prop({ type: [String], default: ['rider'] })
   userRoles: string[]; // 'rider', 'driver', 'admin'
 

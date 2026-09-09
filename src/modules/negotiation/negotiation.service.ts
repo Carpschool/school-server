@@ -45,6 +45,9 @@ export class NegotiationService {
   ): Promise<Negotiation> {
     const driver = await this.userModel.findOne({ centralUserId: driverCentralUserId });
     if (!driver) throw new BadRequestException('Driver profile not found');
+    if (driver.role !== 'driver' && !driver.userRoles?.includes('driver')) {
+      throw new BadRequestException('Only registered Drivers can initiate carpool negotiations.');
+    }
     if (!driver.isEduVerified) {
       throw new BadRequestException('Driver must be .edu verified to reach out to riders');
     }

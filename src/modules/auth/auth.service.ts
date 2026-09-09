@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, BadRequestException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { LocalUser, LocalUserDocument } from './schemas/local-user.schema';
@@ -28,6 +28,8 @@ export class AuthService {
           clerkUserId: userClaims.clerkUserId,
           fullName: userClaims.fullName,
           isEduVerified: false,
+          role: null,
+          isOnboarded: false,
           userRoles: ['rider'],
         },
       },
@@ -40,11 +42,13 @@ export class AuthService {
   }
 
   /**
-   * Updates local student profile (personalEmail, roles, vehicle).
+   * Updates local student profile (role, isOnboarded, personalEmail, vehicle).
    */
   async updateProfile(
     centralUserId: string,
     dto: {
+      role?: 'rider' | 'driver';
+      isOnboarded?: boolean;
       personalEmail?: string;
       userRoles?: string[];
       vehicle?: {
@@ -57,11 +61,26 @@ export class AuthService {
     },
   ): Promise<LocalUser> {
     const update: any = {};
+    if (dto.role !== undefined) {
+      if (dto.role !== 'rider' && dto.role !== 'driver') {
+        throw new BadRequestException('Role must be either "rider" or "driver"');
+      }
+      update.role = dto.role;
+      update.userRoles = [dto.role];
+    }
+    if (dto.isOnboarded !== undefined) {
+      update.isOnboarded = Boolean(dto.isOnboarded);
+    }
     if (dto.personalEmail !== undefined) {
       update.personalEmail = dto.personalEmail ? dto.personalEmail.trim().toLowerCase() : null;
     }
-    if (dto.userRoles !== undefined) {
+    if (dto.userRoles !== undefined && dto.role === undefined) {
       update.userRoles = dto.userRoles;
+      if (dto.userRoles.includes('driver')) {
+        update.role = 'driver';
+      } else if (dto.userRoles.includes('rider')) {
+        update.role = 'rider';
+      }
     }
     if (dto.vehicle !== undefined) {
       update.vehicle = dto.vehicle;
