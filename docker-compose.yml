@@ -1,0 +1,63 @@
+services:
+  # ----------------------------------------------------------------------------
+  # School Autonomous Backend (NestJS + Socket.io)
+  # ----------------------------------------------------------------------------
+  school-app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: carpschool-school-app
+    restart: unless-stopped
+    ports:
+      - "5000:5000"
+    environment:
+      - NODE_ENV=production
+      - PORT=5000
+      - MONGO_URI=mongodb://school-mongo:27017/school_db
+      - SCHOOL_CODE=${SCHOOL_CODE:-ubc}
+      - OFFICIAL_NAME=${OFFICIAL_NAME:-University of British Columbia}
+      - ALLOWED_EMAIL_DOMAINS=${ALLOWED_EMAIL_DOMAINS:-ubc.ca,student.ubc.ca}
+      - CAMPUS_LATITUDE=${CAMPUS_LATITUDE:-49.2606}
+      - CAMPUS_LONGITUDE=${CAMPUS_LONGITUDE:--123.2460}
+      - MAX_CARPOOL_STUDENTS=${MAX_CARPOOL_STUDENTS:-4}
+      - MAX_HOMES_PER_USER=${MAX_HOMES_PER_USER:-3}
+      - SCHOOL_ED25519_PRIVATE_KEY=${SCHOOL_ED25519_PRIVATE_KEY}
+      - SCHOOL_ED25519_PUBLIC_KEY=${SCHOOL_ED25519_PUBLIC_KEY}
+      - CENTRAL_ED25519_PUBLIC_KEY=${CENTRAL_ED25519_PUBLIC_KEY}
+    depends_on:
+      school-mongo:
+        condition: service_healthy
+    networks:
+      - school_internal_network
+
+  # ----------------------------------------------------------------------------
+  # Isolated MongoDB Instance for School Server
+  # Security: No authentication, ZERO exposed host ports, internal network only.
+  # ----------------------------------------------------------------------------
+  school-mongo:
+    image: mongo:7.0
+    container_name: carpschool-school-mongo
+    restart: unless-stopped
+    # CRITICAL: No 'ports' directive! Completely unexposed to host and outside world.
+    volumes:
+      - school_mongo_data:/data/db
+    networks:
+      - school_internal_network
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+# ------------------------------------------------------------------------------
+# Isolated Internal Network: Database is completely unreachable from host/outside
+# ------------------------------------------------------------------------------
+networks:
+  school_internal_network:
+    driver: bridge
+    name: carpschool_school_internal_net
+
+volumes:
+  school_mongo_data:
+    name: carpschool_school_mongo_data
