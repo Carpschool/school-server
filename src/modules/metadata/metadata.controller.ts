@@ -16,12 +16,12 @@ export class MetadataController {
   })
   @ApiResponse({ status: 200, description: 'Signed school metadata' })
   getMetadata(@Res() res: Response) {
-    const { payloadObj, signatureBase64 } = this.metadataService.getSignedMetadata();
+    const { payloadString, signatureBase64 } = this.metadataService.getSignedMetadata();
 
     // Attach cryptographic Ed25519 signature in HTTP header
     res.setHeader('x-school-signature', signatureBase64);
     res.setHeader('Content-Type', 'application/json');
 
-    return res.status(HttpStatus.OK).json(payloadObj);
+    return res.status(HttpStatus.OK).send(payloadString);
   }
 }
