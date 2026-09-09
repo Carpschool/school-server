@@ -17,8 +17,16 @@ export class HomesService {
   ) {}
 
   async createHome(centralUserId: string, dto: CreateHomeDto): Promise<UserHome> {
-    const user = await this.userModel.findOne({ centralUserId });
-    if (!user) throw new BadRequestException('User not found');
+    let user = await this.userModel.findOne({ centralUserId });
+    if (!user) {
+      user = await this.userModel.create({
+        centralUserId,
+        clerkUserId: centralUserId,
+        fullName: 'Student',
+        isEduVerified: false,
+        userRoles: ['rider'],
+      });
+    }
 
     const maxHomes = parseInt(
       this.configService.get<string>('MAX_HOMES_PER_USER', '3'),

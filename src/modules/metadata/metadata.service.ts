@@ -3,6 +3,9 @@ import { ConfigService } from '@nestjs/config';
 import * as nacl from 'tweetnacl';
 import * as naclUtil from 'tweetnacl-util';
 
+import * as fs from 'fs';
+import * as path from 'path';
+
 /**
  * MetadataService
  * 
@@ -30,22 +33,59 @@ export class MetadataService implements OnModuleInit {
           publicKey: naclUtil.decodeBase64(pubKey),
           secretKey: naclUtil.decodeBase64(privKey),
         };
-        this.logger.log(`🔐 School Ed25519 Keypair loaded. Public Key: ${pubKey}`);
+        this.logger.log(`🔐 School Ed25519 Keypair loaded from environment. Public Key: ${pubKey}`);
         return;
       } catch (err) {
         this.logger.error(`Failed to decode base64 keys: ${err.message}`);
       }
     }
 
-    // Generate ephemeral keypair for development
+    // Check filesystem key file
+    const keyFilePath = this.configService.get<string>(
+      'SCHOOL_KEY_FILE',
+      path.resolve(process.cwd(), '.keys/school_keypair.json'),
+    );
+
+    try {
+      if (fs.existsSync(keyFilePath)) {
+        const fileContent = fs.readFileSync(keyFilePath, 'utf8');
+        const parsed = JSON.parse(fileContent);
+        if (parsed.publicKey && parsed.privateKey) {
+          this.keyPair = {
+            publicKey: naclUtil.decodeBase64(parsed.publicKey),
+            secretKey: naclUtil.decodeBase64(parsed.privateKey),
+          };
+          this.logger.log(`🔐 School Ed25519 Keypair loaded from file: ${keyFilePath}`);
+          return;
+        }
+      }
+    } catch (fileErr) {
+      this.logger.warn(`Could not read key file at ${keyFilePath}: ${fileErr.message}`);
+    }
+
+    // Generate persistent keypair
     this.keyPair = nacl.sign.keyPair();
     const generatedPub = naclUtil.encodeBase64(this.keyPair.publicKey);
     const generatedPriv = naclUtil.encodeBase64(this.keyPair.secretKey);
-    this.logger.warn(
-      `⚠️  No school keys provided in environment. Generated ephemeral keypair for development:\n` +
-      `   SCHOOL PUB KEY:  ${generatedPub}\n` +
-      `   SCHOOL PRIV KEY: ${generatedPriv}`
-    );
+
+    try {
+      const dir = path.dirname(keyFilePath);
+      if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+      }
+      fs.writeFileSync(
+        keyFilePath,
+        JSON.stringify({ publicKey: generatedPub, privateKey: generatedPriv }, null, 2),
+        { encoding: 'utf8', mode: 0o600 },
+      );
+      this.logger.log(`💾 Generated and saved new School Ed25519 keypair to ${keyFilePath}`);
+    } catch (writeErr) {
+      this.logger.warn(
+        `⚠️  Could not write keypair to ${keyFilePath} (${writeErr.message}). Using ephemeral in-memory keys.`,
+      );
+    }
+
+    this.logger.log(`   SCHOOL PUBLIC KEY:  ${generatedPub}`);
   }
 
   getPublicKeyBase64(): string {

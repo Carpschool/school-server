@@ -39,8 +39,16 @@ export class VerificationService {
       );
     }
 
-    const user = await this.localUserModel.findOne({ centralUserId });
-    if (!user) throw new BadRequestException('User not found');
+    let user = await this.localUserModel.findOne({ centralUserId });
+    if (!user) {
+      user = await this.localUserModel.create({
+        centralUserId,
+        clerkUserId: centralUserId,
+        fullName: 'Student',
+        isEduVerified: false,
+        userRoles: ['rider'],
+      });
+    }
 
     // Generate random 6-digit numeric OTP
     const code = Math.floor(100000 + Math.random() * 900000).toString();
