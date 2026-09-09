@@ -24,6 +24,7 @@ RUN npm prune --omit=dev
 FROM node:20-alpine AS runner
 WORKDIR /app
 RUN apk add --no-cache dumb-init
+RUN mkdir -p /app/.keys && chown -R node:node /app
 
 ENV NODE_ENV=production
 ENV PORT=5000
