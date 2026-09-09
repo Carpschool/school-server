@@ -4,6 +4,7 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { EduVerification, EduVerificationDocument } from './schemas/edu-verification.schema';
 import { LocalUser, LocalUserDocument } from '../auth/schemas/local-user.schema';
+import { EmailService } from '../email/email.service';
 
 @Injectable()
 export class VerificationService {
@@ -15,6 +16,7 @@ export class VerificationService {
     @InjectModel(LocalUser.name)
     private readonly localUserModel: Model<LocalUserDocument>,
     private readonly configService: ConfigService,
+    private readonly emailService: EmailService,
   ) {}
 
   /**
@@ -65,7 +67,8 @@ export class VerificationService {
       expireAt,
     });
 
-    this.logger.log(`📧 [EDU VERIFICATION] Sent code "${code}" to "${cleanEmail}"`);
+    const officialName = this.configService.get<string>('OFFICIAL_NAME', 'Campus Carpool');
+    await this.emailService.sendEduVerificationCode(cleanEmail, code, officialName);
 
     return {
       success: true,
@@ -75,6 +78,7 @@ export class VerificationService {
 
   /**
    * Verifies the 6-digit code and marks isEduVerified: true on the local user.
+   * Enforces the school admin configured maxUsersPerEduEmail limit.
    */
   async verifyCode(centralUserId: string, code: string): Promise<{ verified: boolean }> {
     const user = await this.localUserModel.findOne({ centralUserId });
@@ -94,6 +98,21 @@ export class VerificationService {
       record.attempts += 1;
       await record.save();
       throw new BadRequestException('Incorrect verification code. Please try again.');
+    }
+
+    // Enforce school admin limit on users per institutional email
+    const maxUsersPerEmail = parseInt(
+      this.configService.get<string>('MAX_USERS_PER_EDU_EMAIL', '1'),
+      10,
+    );
+    const existingCount = await this.localUserModel.countDocuments({
+      eduEmail: record.eduEmail,
+      _id: { $ne: user._id },
+    });
+    if (existingCount >= maxUsersPerEmail) {
+      throw new BadRequestException(
+        `This institutional email is already linked to the maximum allowed accounts (${maxUsersPerEmail}) for this school.`,
+      );
     }
 
     // Success! Update local user

@@ -48,6 +48,9 @@ export class NegotiationService {
     if (!driver.isEduVerified) {
       throw new BadRequestException('Driver must be .edu verified to reach out to riders');
     }
+    if (!driver.personalEmail) {
+      throw new BadRequestException('Driver must configure a personal user email in their profile to reach out to riders');
+    }
 
     const application = await this.appModel.findById(applicationId);
     if (!application || application.status !== 'OPEN') {

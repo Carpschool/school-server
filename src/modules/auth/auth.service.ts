@@ -38,4 +38,43 @@ export class AuthService {
   async getProfile(centralUserId: string): Promise<LocalUser | null> {
     return this.localUserModel.findOne({ centralUserId }).exec();
   }
+
+  /**
+   * Updates local student profile (personalEmail, roles, vehicle).
+   */
+  async updateProfile(
+    centralUserId: string,
+    dto: {
+      personalEmail?: string;
+      userRoles?: string[];
+      vehicle?: {
+        make: string;
+        model: string;
+        color: string;
+        licensePlate: string;
+        totalSeatCapacity: number;
+      };
+    },
+  ): Promise<LocalUser> {
+    const update: any = {};
+    if (dto.personalEmail !== undefined) {
+      update.personalEmail = dto.personalEmail ? dto.personalEmail.trim().toLowerCase() : null;
+    }
+    if (dto.userRoles !== undefined) {
+      update.userRoles = dto.userRoles;
+    }
+    if (dto.vehicle !== undefined) {
+      update.vehicle = dto.vehicle;
+    }
+
+    const updated = await this.localUserModel.findOneAndUpdate(
+      { centralUserId },
+      { $set: update },
+      { new: true },
+    );
+    if (!updated) {
+      throw new Error('User profile not found');
+    }
+    return updated;
+  }
 }

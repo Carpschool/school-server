@@ -121,6 +121,10 @@ export class MetadataService implements OnModuleInit {
         this.configService.get<string>('MAX_HOMES_PER_USER', '3'),
         10,
       ),
+      maxUsersPerEduEmail: parseInt(
+        this.configService.get<string>('MAX_USERS_PER_EDU_EMAIL', '1'),
+        10,
+      ),
       ed25519PublicKey: this.getPublicKeyBase64(),
       timestamp: new Date().toISOString(),
     };

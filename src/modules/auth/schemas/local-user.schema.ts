@@ -23,6 +23,13 @@ export class LocalUser {
   @Prop({ default: false })
   isEduVerified: boolean;
 
+  /**
+   * Personal email address for drivers (e.g. personal Gmail/Outlook/etc.).
+   * Required for drivers along with a verified school eduEmail.
+   */
+  @Prop({ default: null, sparse: true })
+  personalEmail?: string;
+
   @Prop({ type: [String], default: ['rider'] })
   userRoles: string[]; // 'rider', 'driver', 'admin'
 

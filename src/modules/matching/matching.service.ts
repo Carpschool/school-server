@@ -38,6 +38,12 @@ export class MatchingService {
   ): Promise<any[]> {
     const driver = await this.userModel.findOne({ centralUserId });
     if (!driver) throw new BadRequestException('Driver not found');
+    if (!driver.isEduVerified) {
+      throw new BadRequestException('Driver must verify their institutional school email first.');
+    }
+    if (!driver.personalEmail) {
+      throw new BadRequestException('Driver must configure a personal user email in their profile.');
+    }
 
     const driverHome = await this.homeModel.findOne({
       _id: query.driverHomeId,

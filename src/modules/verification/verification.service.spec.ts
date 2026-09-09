@@ -6,23 +6,26 @@ import { VerificationService } from './verification.service';
 import { EduVerification } from './schemas/edu-verification.schema';
 import { LocalUser } from '../auth/schemas/local-user.schema';
 
+import { EmailService } from '../email/email.service';
+
 describe('VerificationService', () => {
   let service: VerificationService;
 
   const mockUserDoc = {
-    _id: 'local_user_1',
+    _id: 'usr_mock_001',
     centralUserId: 'usr_student_01',
-    fullName: 'Jane Doe',
+    fullName: 'Alice Student',
     isEduVerified: false,
     save: jest.fn().mockResolvedValue(true),
   };
 
   const mockVerificationDoc = {
-    _id: 'verif_01',
-    userId: 'local_user_1',
-    eduEmail: 'jane@ubc.ca',
+    _id: 'verif_001',
+    userId: 'usr_mock_001',
+    eduEmail: 'student@ubc.ca',
     code: '123456',
     attempts: 0,
+    expireAt: new Date(Date.now() + 15 * 60 * 1000),
     save: jest.fn().mockResolvedValue(true),
   };
 
@@ -36,6 +39,11 @@ describe('VerificationService', () => {
   const mockUserModel = {
     findOne: jest.fn(),
     create: jest.fn(),
+    countDocuments: jest.fn().mockResolvedValue(0),
+  };
+
+  const mockEmailService = {
+    sendEduVerificationCode: jest.fn().mockResolvedValue(true),
   };
 
   beforeEach(async () => {
@@ -49,6 +57,7 @@ describe('VerificationService', () => {
           useValue: {
             get: jest.fn((key: string, defaultValue?: any) => {
               if (key === 'ALLOWED_EMAIL_DOMAINS') return 'ubc.ca,student.ubc.ca';
+              if (key === 'MAX_USERS_PER_EDU_EMAIL') return '1';
               return defaultValue;
             }),
           },
@@ -60,6 +69,10 @@ describe('VerificationService', () => {
         {
           provide: getModelToken(LocalUser.name),
           useValue: mockUserModel,
+        },
+        {
+          provide: EmailService,
+          useValue: mockEmailService,
         },
       ],
     }).compile();
@@ -136,6 +149,22 @@ describe('VerificationService', () => {
       ).rejects.toThrow(BadRequestException);
 
       expect(mockVerificationModel.deleteOne).toHaveBeenCalled();
+    });
+
+    it('should reject verification if institutional email already reached max users limit', async () => {
+      const verifRecord = {
+        ...mockVerificationDoc,
+        code: '654321',
+        attempts: 0,
+      };
+      mockUserModel.findOne.mockResolvedValue(mockUserDoc);
+      mockVerificationModel.findOne.mockResolvedValue(verifRecord);
+      // Simulate 1 existing linked account when limit is 1
+      mockUserModel.countDocuments.mockResolvedValue(1);
+
+      await expect(
+        service.verifyCode('usr_student_01', '654321'),
+      ).rejects.toThrow('maximum allowed accounts');
     });
   });
 });

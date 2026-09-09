@@ -10,6 +10,7 @@ import { MatchingModule } from './modules/matching/matching.module';
 import { NegotiationModule } from './modules/negotiation/negotiation.module';
 import { CarpoolsModule } from './modules/carpools/carpools.module';
 import { GatewayModule } from './modules/gateway/gateway.module';
+import { EmailModule } from './modules/email/email.module';
 
 /**
  * AppModule
@@ -46,6 +47,7 @@ import { GatewayModule } from './modules/gateway/gateway.module';
     NegotiationModule,
     CarpoolsModule,
     GatewayModule,
+    EmailModule,
   ],
 })
 export class AppModule {}
