@@ -125,6 +125,10 @@ export class MetadataService implements OnModuleInit {
         this.configService.get<string>('MAX_USERS_PER_EDU_EMAIL', '1'),
         10,
       ),
+      requireEduVerificationForRiders:
+        this.configService.get<string>('REQUIRE_RIDER_EDU_VERIFICATION', 'true') === 'true',
+      requireEduVerificationForDrivers:
+        this.configService.get<string>('REQUIRE_DRIVER_EDU_VERIFICATION', 'true') === 'true',
       ed25519PublicKey: this.getPublicKeyBase64(),
       timestamp: new Date().toISOString(),
     };

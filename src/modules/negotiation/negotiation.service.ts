@@ -5,6 +5,7 @@ import {
   Logger,
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
+import { ConfigService } from '@nestjs/config';
 import { Model, Types } from 'mongoose';
 import {
   Negotiation,
@@ -34,6 +35,7 @@ export class NegotiationService {
     @InjectModel(Carpool.name)
     private readonly carpoolModel: Model<CarpoolDocument>,
     private readonly gateway: NegotiationGateway,
+    private readonly configService: ConfigService,
   ) {}
 
   /**
@@ -48,7 +50,9 @@ export class NegotiationService {
     if (driver.role !== 'driver' && !driver.userRoles?.includes('driver')) {
       throw new BadRequestException('Only registered Drivers can initiate carpool negotiations.');
     }
-    if (!driver.isEduVerified) {
+    const requireDriverVerification =
+      this.configService.get<string>('REQUIRE_DRIVER_EDU_VERIFICATION', 'true') === 'true';
+    if (requireDriverVerification && !driver.isEduVerified) {
       throw new BadRequestException('Driver must be .edu verified to reach out to riders');
     }
     if (!driver.personalEmail) {

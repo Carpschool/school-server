@@ -1,5 +1,6 @@
 import { Injectable, BadRequestException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
+import { ConfigService } from '@nestjs/config';
 import { Model } from 'mongoose';
 import {
   RiderApplication,
@@ -18,6 +19,7 @@ export class MatchingService {
     private readonly homeModel: Model<UserHomeDocument>,
     @InjectModel(LocalUser.name)
     private readonly userModel: Model<LocalUserDocument>,
+    private readonly configService: ConfigService,
   ) {}
 
   /**
@@ -41,7 +43,9 @@ export class MatchingService {
     if (driver.role !== 'driver' && !driver.userRoles?.includes('driver')) {
       throw new BadRequestException('Only registered Drivers can search the commute corridor.');
     }
-    if (!driver.isEduVerified) {
+    const requireDriverVerification =
+      this.configService.get<string>('REQUIRE_DRIVER_EDU_VERIFICATION', 'true') === 'true';
+    if (requireDriverVerification && !driver.isEduVerified) {
       throw new BadRequestException('Driver must verify their institutional school email first.');
     }
     if (!driver.personalEmail) {

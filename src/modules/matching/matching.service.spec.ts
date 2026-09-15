@@ -1,6 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { getModelToken } from '@nestjs/mongoose';
 import { BadRequestException } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { MatchingService } from './matching.service';
 import { RiderApplication, CommuteDirection } from '../applications/schemas/rider-application.schema';
 import { UserHome } from '../homes/schemas/user-home.schema';
@@ -14,20 +15,19 @@ describe('MatchingService', () => {
     centralUserId: 'usr_driver_bob',
     fullName: 'Bob Driver',
     role: 'driver',
+    userRoles: ['driver'],
     isEduVerified: true,
-    personalEmail: 'bob@gmail.com',
+    personalEmail: 'bob@personal.com',
   };
 
-  const mockDriverHome = {
+  const mockHomeDoc = {
     _id: 'home_01',
     userId: 'driver_01',
-    location: {
-      type: 'Point',
-      coordinates: [-123.246, 49.2606],
-    },
+    location: { coordinates: [-123.1207, 49.2827] },
   };
 
   const mockAppModel = {
+    aggregate: jest.fn(),
     find: jest.fn().mockReturnThis(),
     populate: jest.fn().mockReturnThis(),
     limit: jest.fn().mockReturnThis(),
@@ -41,6 +41,8 @@ describe('MatchingService', () => {
   const mockUserModel = {
     findOne: jest.fn(),
   };
+
+  const mockDriverHome = mockHomeDoc;
 
   beforeEach(async () => {
     jest.clearAllMocks();
@@ -59,6 +61,12 @@ describe('MatchingService', () => {
         {
           provide: getModelToken(LocalUser.name),
           useValue: mockUserModel,
+        },
+        {
+          provide: ConfigService,
+          useValue: {
+            get: jest.fn().mockReturnValue('true'),
+          },
         },
       ],
     }).compile();

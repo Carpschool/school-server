@@ -1,5 +1,6 @@
 import { Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
+import { ConfigService } from '@nestjs/config';
 import { Model } from 'mongoose';
 import {
   RiderApplication,
@@ -18,6 +19,7 @@ export class ApplicationsService {
     private readonly userModel: Model<LocalUserDocument>,
     @InjectModel(UserHome.name)
     private readonly homeModel: Model<UserHomeDocument>,
+    private readonly configService: ConfigService,
   ) {}
 
   async createApplication(
@@ -29,7 +31,9 @@ export class ApplicationsService {
     if (user.role === 'driver') {
       throw new BadRequestException('Only registered Riders can post carpool commute applications.');
     }
-    if (!user.isEduVerified) {
+    const requireRiderVerification =
+      this.configService.get<string>('REQUIRE_RIDER_EDU_VERIFICATION', 'true') === 'true';
+    if (requireRiderVerification && !user.isEduVerified) {
       throw new BadRequestException('You must verify your .edu email before posting a carpool application');
     }
 

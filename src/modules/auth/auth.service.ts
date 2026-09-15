@@ -94,6 +94,16 @@ export class AuthService {
     if (!updated) {
       throw new Error('User profile not found');
     }
+
+    if (updated.role === 'driver' && updated.isOnboarded) {
+      const plate = updated.vehicle?.licensePlate;
+      if (!plate || !plate.trim()) {
+        // Revert isOnboarded to false
+        await this.localUserModel.updateOne({ centralUserId }, { isOnboarded: false });
+        throw new BadRequestException('Drivers must provide a valid vehicle license plate number to complete profile.');
+      }
+    }
+
     return updated;
   }
 }
