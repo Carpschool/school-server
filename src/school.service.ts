@@ -8,14 +8,15 @@ import { Mailer } from './mailer.js';
 import { loadConfig } from './config.js';
 import { hashCode, compareCode } from './security.js';
 import { objectId } from './validation.js';
+import { SettingsService } from './settings.js';
 @Injectable()
 export class SchoolService {
- constructor(readonly db:Database,readonly mailer:Mailer){}
+ constructor(readonly db:Database,readonly mailer:Mailer,readonly settings:SettingsService){}
  async transaction<T>(fn:(session:any)=>Promise<T>):Promise<T>{const session=await this.db.connection.startSession();try{return await session.withTransaction(()=>fn(session)) as T;}finally{await session.endSession();}}
  async ready(sub:string,role?:string){const u=await this.db.users.findOne({sub}).lean<any>();if(!u||!u.verified||u.banned)throw new ForbiddenException('Verify your school email first');if(role&&u.role!==role)throw new ForbiddenException(role+' role required');return u;}
  async owner(model:any,id:string,sub:string){const doc=await model.findOne({_id:objectId(id),owner:sub}).lean();if(!doc)throw new NotFoundException();return doc;}
  async limit(key:string,max:number,seconds:number){const bucket=Math.floor(Date.now()/(seconds*1000));const r=await this.db.limits.findOneAndUpdate({key:key+':'+bucket},{$inc:{count:1},$setOnInsert:{expiresAt:new Date((bucket+2)*seconds*1000)}},{upsert:true,new:true});if(r.count>max)throw new HttpException('Try again later',429);}
- async domains(){const setting=await this.db.settings.findOne({key:'domains'}).lean<any>();return setting?.value??loadConfig().ALLOWED_EMAIL_DOMAINS.split(',').map(d=>d.trim().toLowerCase());}
+ async domains(){return (await this.settings.get()).domains;}
  async sendOtp(sub:string,email:string,ip:string){
   const u=await this.db.users.findOne({sub}).lean<any>();if(u?.verified)throw new ConflictException('School email already verified');
   email=email.trim().toLowerCase();const domain=email.split('@')[1];if(!(await this.domains()).includes(domain))throw new BadRequestException('School email domain not allowed');
@@ -30,7 +31,7 @@ export class SchoolService {
   return this.transaction(async session=>{
    const consume=await this.db.otps.deleteOne({_id:otp._id,hash:otp.hash},{session});if(!consume.deletedCount)throw new ConflictException('Code already used');
    await this.db.emails.updateOne({email:otp.email},{$setOnInsert:{subs:[]}},{upsert:true,session});
-   const slots=await this.db.emails.findOneAndUpdate({email:otp.email,subs:{$ne:sub},$expr:{$lt:[{$size:'$subs'},loadConfig().MAX_USERS_PER_EDU_EMAIL]}},{$addToSet:{subs:sub}},{new:true,session});
+   const slots=await this.db.emails.findOneAndUpdate({email:otp.email,subs:{$ne:sub},$expr:{$lt:[{$size:'$subs'},(await this.settings.get()).limits.maxUsersPerEduEmail]}},{$addToSet:{subs:sub}},{new:true,session});
    if(!slots)throw new ConflictException('School email account limit reached');
    await this.db.users.updateOne({sub,verified:false},{$set:{verified:true,eduEmail:otp.email}},{session});return {verified:true};
   });
@@ -40,7 +41,7 @@ export class SchoolService {
   const updated=await this.db.users.findOneAndUpdate({sub,role:{$exists:false}},{$set:body},{new:true}).lean<any>();
   if(!updated)throw new ConflictException('Role is permanently locked');return updated;
  }
- async addHome(sub:string,body:any){await this.ready(sub);return this.transaction(async session=>{const reserved=await this.db.users.findOneAndUpdate({sub,homeCount:{$lt:loadConfig().MAX_HOMES_PER_USER}},{$inc:{homeCount:1}},{session,new:true});if(!reserved)throw new ConflictException('Home limit reached');return (await this.db.homes.create([{owner:sub,...body}],{session}))[0];});}
+ async addHome(sub:string,body:any){await this.ready(sub);return this.transaction(async session=>{const reserved=await this.db.users.findOneAndUpdate({sub,homeCount:{$lt:(await this.settings.get()).limits.maxHomesPerUser}},{$inc:{homeCount:1}},{session,new:true});if(!reserved)throw new ConflictException('Home limit reached');return (await this.db.homes.create([{owner:sub,...body}],{session}))[0];});}
  async deleteHome(sub:string,id:string){await this.ready(sub);return this.transaction(async session=>{const h=await this.db.homes.findOneAndDelete({_id:objectId(id),owner:sub},{session});if(!h)throw new NotFoundException();await this.db.users.updateOne({sub},{$inc:{homeCount:-1}},{session});return {deleted:true};});}
  async createRequest(sub:string,b:any){await this.ready(sub,'rider');const home=await this.owner(this.db.homes,b.homeId,sub);return this.db.requests.create({owner:sub,...b,location:home.location,walkingRadius:home.walkingRadius});}
  async createDrive(sub:string,b:any){await this.ready(sub,'driver');await this.owner(this.db.homes,b.homeId,sub);return this.db.drives.create({owner:sub,...b,route:{type:'LineString',coordinates:b.route},seats:b.seats,availableSeats:b.seats,passengers:[]});}

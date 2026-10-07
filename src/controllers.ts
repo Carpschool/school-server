@@ -8,6 +8,7 @@ import { Public, Admin, Auth } from './security.js';
 import { Database } from './database.js';
 import { SchoolService } from './school.service.js';
 import { loadConfig } from './config.js';
+import { SettingsService, settingsPatch } from './settings.js';
 import { parse, objectId, geo, commute, coordinates, proposalSchema } from './validation.js';
 const dto=(schema:z.ZodTypeAny)=>ApiBody({schema:zodToJsonSchema(schema,{$refStrategy:'none'}) as any});
 const sessionDto=z.object({ticket:z.string().min(20).max(16000)}).strict();
@@ -29,7 +30,7 @@ const report=z.object({subject:z.string().min(1).max(128),reason:z.string().min(
 export class PublicController {
  constructor(readonly auth:Auth,readonly service:SchoolService){}
  @Public() @Get('health') health(){return {status:'ok',schoolCode:loadConfig().SCHOOL_CODE};}
- @Public() @Get('.well-known/carpschool.json') async metadata(){const c=loadConfig();return {schoolCode:c.SCHOOL_CODE,name:c.OFFICIAL_NAME,domains:await this.service.domains(),baseUrl:c.PUBLIC_URL,publicKey:createPublicKey(createPrivateKey(readFileSync(c.SIGNING_KEY_PATH))).export({type:'spki',format:'pem'}),campus:{coordinates:[c.CAMPUS_LONGITUDE,c.CAMPUS_LATITUDE]},limits:{homes:c.MAX_HOMES_PER_USER,seats:c.MAX_CARPOOL_STUDENTS}};}
+ @Public() @Get('.well-known/carpschool.json') async metadata(){const c=loadConfig();const s=await this.service.settings.get();return {schoolCode:c.SCHOOL_CODE,name:s.officialName,domains:s.domains,baseUrl:c.PUBLIC_URL,publicKey:createPublicKey(createPrivateKey(readFileSync(c.SIGNING_KEY_PATH))).export({type:'spki',format:'pem'}),campus:{name:s.campus.name,address:s.campus.address,coordinates:[s.campus.longitude,s.campus.latitude]},limits:{homes:s.limits.maxHomesPerUser,seats:s.limits.maxCarpoolStudents}};}
  @Public() @Get('federation/challenge') challenge(@Query('nonce') nonce:string){parse(z.string().regex(/^[A-Za-z0-9_-]{16,128}$/),nonce);return {signature:sign(null,Buffer.from(nonce),createPrivateKey(readFileSync(loadConfig().SIGNING_KEY_PATH))).toString('base64url')};}
  @Public() @Post('sessions') @dto(sessionDto) exchange(@Body() b:unknown){return this.auth.exchange(parse(sessionDto,b).ticket);}
 }
@@ -53,7 +54,7 @@ export class RideController {
  @Get('requests/:id') async getRequest(@Req() r:any,@Param('id') id:string){await this.service.ready(r.identity.sub);return this.service.owner(this.db.requests,id,r.identity.sub);}
  @Delete('requests/:id') async cancelRequest(@Req() r:any,@Param('id') id:string){await this.service.ready(r.identity.sub,'rider');const v=await this.db.requests.findOneAndUpdate({_id:objectId(id),owner:r.identity.sub,status:'active'},{$set:{status:'cancelled'}},{new:true}).lean<any>();if(!v)throw new NotFoundException();return v;}
  @Get('drives') async drives(@Req() r:any){await this.service.ready(r.identity.sub,'driver');return this.db.drives.find({owner:r.identity.sub}).sort({createdAt:-1}).limit(100).lean<any>();}
- @Post('drives') @dto(drive) drive(@Req() r:any,@Body() b:unknown){const v=parse(drive,b);if(v.seats>loadConfig().MAX_CARPOOL_STUDENTS)throw new BadRequestException('School seat limit exceeded');return this.service.createDrive(r.identity.sub,{...v.commute,route:v.route,seats:v.seats});}
+ @Post('drives') @dto(drive) async drive(@Req() r:any,@Body() b:unknown){const v=parse(drive,b);if(v.seats>(await this.service.settings.get()).limits.maxCarpoolStudents)throw new BadRequestException('School seat limit exceeded');return this.service.createDrive(r.identity.sub,{...v.commute,route:v.route,seats:v.seats});}
  @Get('drives/:id') async getDrive(@Req() r:any,@Param('id') id:string){await this.service.ready(r.identity.sub);return this.service.owner(this.db.drives,id,r.identity.sub);}
  @Delete('drives/:id') cancelDrive(@Req() r:any,@Param('id') id:string){return this.service.cancelDrive(r.identity.sub,id);}
  @Get('drives/:id/matches') matches(@Req() r:any,@Param('id') id:string){return this.service.matches(r.identity.sub,id);}
@@ -98,6 +99,8 @@ export class AdminController {
  @Get('reports') reports(){return this.db.reports.find().sort({createdAt:-1}).limit(100).lean<any>();}
  @Put('reports/:id') @dto(z.object({status:z.enum(['open','resolved','dismissed'])}).strict()) async resolve(@Param('id') id:string,@Body() b:unknown){const v=await this.db.reports.findOneAndUpdate({_id:objectId(id)},{$set:parse(z.object({status:z.enum(['open','resolved','dismissed'])}).strict(),b)},{new:true}).lean<any>();if(!v)throw new NotFoundException();return v;}
  @Get('domains') domains(){return this.service.domains();}
- @Put('domains') @dto(z.object({domains:z.array(z.string().regex(/^[a-z0-9.-]+\.[a-z]{2,}$/)).min(1).max(30)}).strict()) async domainsSet(@Body() b:unknown){const v=parse(z.object({domains:z.array(z.string().regex(/^[a-z0-9.-]+\.[a-z]{2,}$/)).min(1).max(30)}).strict(),b);await this.db.settings.updateOne({key:'domains'},{$set:{value:v.domains}},{upsert:true});return v;}
- @Get('mailer') mailer(){const c=loadConfig();return {provider:c.EMAIL_PROVIDER,user:c.GMAIL_USER,configured:!!c.GMAIL_OAUTH_REFRESH_TOKEN};}
+ @Put('domains') @dto(z.object({domains:settingsPatch.shape.domains.unwrap()}).strict()) async domainsSet(@Body() b:unknown){const v=parse(z.object({domains:settingsPatch.shape.domains.unwrap()}).strict(),b);await this.service.settings.update(v);return v;}
+ @Get('mailer') async mailer(){return (await this.service.settings.view()).mailer;}
+ @Get('settings') settingsGet(){return this.service.settings.view();}
+ @Put('settings') @dto(settingsPatch) settingsPut(@Body() b:unknown){return this.service.settings.update(parse(settingsPatch,b));}
 }
