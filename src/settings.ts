@@ -65,8 +65,8 @@ export class SettingsService {
   await this.write(next);return this.view();
  }
  /** Called once by the setup claim. */
- async claim(v:{schoolCode:string;centralUrl:string;publicUrl:string}){
+ async claim(v:{schoolCode:string;centralUrl:string;publicUrl:string;name?:string}){
   const cur=(await this.db.settings.findOne({key:'school'}).lean<any>())?.value||{};
-  await this.write({...cur,configured:true,schoolCode:v.schoolCode,centralUrl:v.centralUrl,publicUrl:v.publicUrl});
+  await this.write({...cur,configured:true,schoolCode:v.schoolCode,centralUrl:v.centralUrl,publicUrl:v.publicUrl,...(v.name?{officialName:v.name}:{})});
  }
 }

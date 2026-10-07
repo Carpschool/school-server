@@ -9,7 +9,7 @@ export const claimDto=z.object({
  assertion:z.string().min(20).max(8000),
  nonce:z.string().regex(/^[A-Za-z0-9_-]{16,128}$/),
 }).strict();
-const assertionClaims=z.object({schoolCode,publicUrl:z.string().max(2048),nonce:z.string()}).passthrough();
+const assertionClaims=z.object({schoolCode,publicUrl:z.string().max(2048),nonce:z.string(),name:z.string().trim().min(2).max(200).optional()}).passthrough();
 /**
  * First-run bootstrap. An unconfigured school prints a one-time setup code to its logs
  * (first 7 hex of sha256 over 64 KiB of randomness). A central admin enters that code in the
@@ -42,7 +42,7 @@ export class SetupService implements OnApplicationBootstrap {
    try{p=(await jwtVerify(body.assertion,jwks??createRemoteJWKSet(new URL('/.well-known/jwks.json',iss),{timeoutDuration:5000}),{algorithms:['EdDSA'],issuer:iss,audience:'carpschool-setup',maxTokenAge:'5m'})).payload;}catch{throw new UnauthorizedException('Central assertion rejected');}
    const c=assertionClaims.safeParse(p);if(!c.success||c.data.nonce!==body.nonce)throw new BadRequestException('Invalid assertion claims');
    let publicUrl:string;try{publicUrl=safeOrigin(c.data.publicUrl);}catch{throw new BadRequestException('Invalid public URL');}
-   await this.settings.claim({schoolCode:c.data.schoolCode,centralUrl:iss,publicUrl});
+   await this.settings.claim({schoolCode:c.data.schoolCode,centralUrl:iss,publicUrl,name:c.data.name});
    this.code=undefined;this.logger.log('Claimed by '+iss+' as '+c.data.schoolCode+'; setup code destroyed');
    return {schoolCode:c.data.schoolCode,publicKey:schoolPublicKey(),signature:sign(null,Buffer.from(body.nonce),schoolKey()).toString('base64url')};
   }finally{this.busy=false;}
