@@ -62,7 +62,7 @@ export class SchoolService {
   const n=await this.participant(sub,id);
   const result=await this.transaction(async session=>{
    const p=await this.db.proposals.findOneAndUpdate({_id:objectId(proposalId),negotiationId:id,author:{$ne:sub},status:'pending'},{$set:{status:'accepted'}},{session,new:true}).lean<any>();if(!p)throw new ConflictException('Proposal unavailable or not yours to accept');
-   const conversation=await this.db.negotiations.findOneAndUpdate({_id:id,status:'open'},{$set:{status:'locked'}},{session,new:true});if(!conversation)throw new ConflictException('Already locked');
+   const conversation=await this.db.negotiations.findOneAndUpdate({_id:id,status:'open'},{$set:{status:'locked'}},{session,new:true});if(!conversation)throw new ConflictException('Already locked');await this.db.proposals.updateMany({negotiationId:id,status:'pending',_id:{$ne:p._id}},{$set:{status:'superseded'}},{session});
    const req=await this.db.requests.findOneAndUpdate({_id:n.requestId,status:'active'},{$set:{status:'locked'}},{session,new:true});if(!req)throw new ConflictException('Rider request already locked');
    const pin=randomInt(0,10000).toString().padStart(4,'0');
    const booked=await this.db.drives.findOneAndUpdate({_id:n.driveId,status:'active',availableSeats:{$gt:0},'passengers.rider':{$ne:n.rider}},{$inc:{availableSeats:-1},$push:{passengers:{rider:n.rider,negotiationId:id,proposalId,pickup:p.pickup,time:p.time,pinHash:hashCode(pin),pinAttempts:0,status:'locked'}}},{new:true,session}).lean<any>();
