@@ -22,8 +22,8 @@ const home=z.object({label:z.string().min(1).max(80),location:geo,walkingRadius:
 const drive=z.object({commute,route:z.array(coordinates).min(2).max(1000),seats:z.number().int().min(1).max(12)}).strict();
 const message=z.object({text:z.string().min(1).max(2000)}).strict();
 const rider=z.object({rider:z.string().min(1).max(128)}).strict();
-const board=z.object({rider:z.string().min(1).max(128),pin:z.string().regex(/^\d{4}$/),location:geo}).strict();
-const dropoff=z.object({rider:z.string().min(1).max(128),location:geo}).strict();
+const board=z.object({rider:z.string().min(1).max(128),pin:z.string().regex(/^\d{4}$/),location:geo,approximate:z.boolean().optional()}).strict();
+const dropoff=z.object({rider:z.string().min(1).max(128),location:geo.nullable(),approximate:z.boolean().optional()}).strict();
 const report=z.object({subject:z.string().min(1).max(128),reason:z.string().min(5).max(2000)}).strict();
 @ApiTags('public')
 @Controller()
@@ -80,8 +80,8 @@ export class CarpoolController {
  @Get() async list(@Req() r:any){await this.service.ready(r.identity.sub);return this.db.drives.find({$or:[{owner:r.identity.sub},{'passengers.rider':r.identity.sub}]}).select('-route').limit(100).lean<any>().then((ds:any[])=>ds.map((d:any)=>({...d,passengers:d.owner===r.identity.sub?d.passengers:d.passengers.filter((p:any)=>p.rider===r.identity.sub)})));}
  @Get(':id') get(@Req() r:any,@Param('id') id:string){return this.service.carpool(r.identity.sub,id);}
  @Post(':id/pin') pin(@Req() r:any,@Param('id') id:string){return this.service.pin(r.identity.sub,id);}
- @Post(':id/board') @dto(board) async board(@Req() r:any,@Param('id') id:string,@Body() b:unknown){const v=parse(board,b);const result=await this.service.board(r.identity.sub,id,v.rider,v.pin,v.location);if('invalid' in result)throw new BadRequestException('Invalid PIN');return result;}
- @Post(':id/dropoff') @dto(dropoff) dropoff(@Req() r:any,@Param('id') id:string,@Body() b:unknown){const v=parse(dropoff,b);return this.service.dropoff(r.identity.sub,id,v.rider,v.location);}
+ @Post(':id/board') @dto(board) async board(@Req() r:any,@Param('id') id:string,@Body() b:unknown){const v=parse(board,b);const result=await this.service.board(r.identity.sub,id,v.rider,v.pin,v.location,v.approximate);if('invalid' in result)throw new BadRequestException('Wrong PIN. Ask the rider to check their pass.');return result;}
+ @Post(':id/dropoff') @dto(dropoff) dropoff(@Req() r:any,@Param('id') id:string,@Body() b:unknown){const v=parse(dropoff,b);return this.service.dropoff(r.identity.sub,id,v.rider,v.location,v.approximate);}
  @Post(':id/leave') @dto(rider) leave(@Req() r:any,@Param('id') id:string,@Body() b:unknown){return this.service.leave(r.identity.sub,id,parse(rider,b).rider);}
  @Get(':id/events') async events(@Req() r:any,@Param('id') id:string){const d=await this.service.carpool(r.identity.sub,id);return this.db.events.find({driveId:id,...(d.owner===r.identity.sub?{}:{rider:r.identity.sub})}).lean<any>();}
 }

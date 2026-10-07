@@ -27,7 +27,7 @@ export class Database implements OnModuleInit, OnModuleDestroy {
   this.proposals=make('Proposal',{negotiationId:String,author:String,pickup:point,time:String,status:{type:String,default:'pending'}});
   this.reports=make('Report',{reporter:String,subject:String,reason:String,status:{type:String,default:'open'}});
   this.blocks=make('Block',{owner:String,subject:String},[[{owner:1,subject:1},{unique:true}]]);
-  this.events=make('Event',{driveId:String,rider:String,driver:String,kind:String,location:point,time:Date});
+  this.events=make('Event',{driveId:String,rider:String,driver:String,kind:String,location:point,approximate:{type:Boolean,default:false},time:Date});
   this.limits=make('RateLimit',{key:{type:String,unique:true},count:Number,expiresAt:Date},[[{expiresAt:1},{expireAfterSeconds:0}]]);
   this.settings=make('Setting',{key:{type:String,unique:true},value:Schema.Types.Mixed});
   await Promise.all(Object.values(this).filter(v=>v && typeof v.init==='function').map(v=>v.init()));
