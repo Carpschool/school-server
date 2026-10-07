@@ -13,7 +13,7 @@ export class Database implements OnModuleInit, OnModuleDestroy {
    const s = new Schema(fields,{timestamps:true,strict:true});
    indexes.forEach(([keys,opts])=>s.index(keys,opts)); return this.connection.model<any>(name,s);
   };
-  this.users=make('User',{sub:{type:String,unique:true},eduEmail:String,verified:{type:Boolean,default:false},role:{type:String,enum:['rider','driver']},name:String,phone:String,personalEmail:String,car:Schema.Types.Mixed,licenseConfirmed:Boolean,banned:{type:Boolean,default:false},homeCount:{type:Number,default:0}});
+  this.users=make('User',{sub:{type:String,unique:true},eduEmail:String,verified:{type:Boolean,default:false},avatar:String,role:{type:String,enum:['rider','driver']},name:String,phone:String,personalEmail:String,car:Schema.Types.Mixed,licenseConfirmed:Boolean,banned:{type:Boolean,default:false},homeCount:{type:Number,default:0}});
   this.sessions=make('Session',{hash:{type:String,unique:true},sub:String,schoolAdmin:Boolean,expiresAt:Date},[[{expiresAt:1},{expireAfterSeconds:0}]]);
   this.replays=make('TicketReplay',{jti:{type:String,unique:true},expiresAt:Date},[[{expiresAt:1},{expireAfterSeconds:0}]]);
   this.otps=make('Otp',{sub:{type:String,unique:true},email:String,hash:String,attempts:{type:Number,default:0},expiresAt:Date},[[{expiresAt:1},{expireAfterSeconds:0}]]);

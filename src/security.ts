@@ -25,7 +25,7 @@ export class Auth implements OnModuleInit {
   if(!p.sub||!p.jti||!p.exp||!p.iat||p.exp-p.iat>960)throw new UnauthorizedException('Invalid ticket claims');
   const expiresAt=new Date(p.exp*1000);
   try{await this.db.replays.create({jti:p.jti,expiresAt});}catch{throw new ConflictException('Ticket already exchanged');}
-  await this.db.users.updateOne({sub:p.sub},{$setOnInsert:{sub:p.sub}},{upsert:true});
+  await this.db.users.updateOne({sub:p.sub},{$setOnInsert:{sub:p.sub},$set:{avatar:typeof p.avatar==='string'?p.avatar:''}},{upsert:true});
   const token=randomBytes(32).toString('base64url');
   await this.db.sessions.create({hash:digest(token),sub:p.sub,schoolAdmin:p.schoolAdmin===true,expiresAt});
   return {token,expiresAt};
