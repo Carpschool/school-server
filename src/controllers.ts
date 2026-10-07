@@ -97,6 +97,10 @@ export class SafetyController {
 export class AdminController {
  constructor(readonly db:Database,readonly service:SchoolService){}
  @Get('users') users(){return this.db.users.find().sort({createdAt:-1}).limit(100).lean<any>();}
+ /** One student's full record at this school (profile + their data). */
+ @Get('users/:id') async user(@Param('id') id:string){const u=await this.db.users.findOne({_id:objectId(id)}).lean<any>();if(!u)throw new NotFoundException();const s=u.sub;
+  const [homes,requests,drives,reportsBy,reportsAbout,blocks]=await Promise.all([this.db.homes.find({owner:s}).lean<any>(),this.db.requests.find({owner:s}).sort({createdAt:-1}).limit(50).lean<any>(),this.db.drives.find({$or:[{owner:s},{'passengers.rider':s}]}).sort({createdAt:-1}).limit(50).lean<any>(),this.db.reports.find({reporter:s}).sort({createdAt:-1}).limit(50).lean<any>(),this.db.reports.find({subject:s}).sort({createdAt:-1}).limit(50).lean<any>(),this.db.blocks.countDocuments({owner:s})]);
+  return {user:u,homes,requests,drives,reportsBy,reportsAbout,blocks};}
  @Put('users/:id/ban') @dto(z.object({banned:z.boolean()}).strict()) async ban(@Param('id') id:string,@Body() b:unknown){const u=await this.db.users.findOneAndUpdate({_id:objectId(id)},{$set:parse(z.object({banned:z.boolean()}).strict(),b)},{new:true}).lean<any>();if(!u)throw new NotFoundException();return u;}
  @Get('reports') reports(){return this.db.reports.find().sort({createdAt:-1}).limit(100).lean<any>();}
  @Put('reports/:id') @dto(z.object({status:z.enum(['open','resolved','dismissed'])}).strict()) async resolve(@Param('id') id:string,@Body() b:unknown){const v=await this.db.reports.findOneAndUpdate({_id:objectId(id)},{$set:parse(z.object({status:z.enum(['open','resolved','dismissed'])}).strict(),b)},{new:true}).lean<any>();if(!v)throw new NotFoundException();return v;}
