@@ -22,7 +22,7 @@ export class Database implements OnModuleInit, OnModuleDestroy {
   const commute={owner:String,homeId:String,direction:String,dates:[String],days:[Number],startTime:String,endTime:String,status:{type:String,default:'active'}};
   this.requests=make('RideRequest',{...commute,location:point,walkingRadius:Number},[[{location:'2dsphere'},{}]]);
   this.drives=make('Drive',{...commute,route:{type:{type:String,enum:['LineString'],default:'LineString'},coordinates:[[Number]]},availableSeats:Number,seats:Number,passengers:[{rider:String,negotiationId:String,proposalId:String,pickup:point,time:String,pinHash:{type:String,select:false},pinAttempts:{type:Number,default:0},status:{type:String,default:'locked'}}]},[[{route:'2dsphere'},{}]]);
-  this.negotiations=make('Negotiation',{driver:String,rider:String,driveId:String,requestId:String,status:{type:String,default:'open'}},[[{driveId:1,requestId:1},{unique:true}]]);
+  this.negotiations=make('Negotiation',{driver:String,rider:String,driveId:String,requestId:String,status:{type:String,default:'open'},round:{type:Number,default:0}},[[{driveId:1,requestId:1,round:1},{unique:true}]]);
   this.messages=make('Message',{negotiationId:String,author:String,text:String});
   this.proposals=make('Proposal',{negotiationId:String,author:String,pickup:point,time:String,status:{type:String,default:'pending'}});
   this.reports=make('Report',{reporter:String,subject:String,reason:String,status:{type:String,default:'open'}});
@@ -30,6 +30,8 @@ export class Database implements OnModuleInit, OnModuleDestroy {
   this.events=make('Event',{driveId:String,rider:String,driver:String,kind:String,location:point,approximate:{type:Boolean,default:false},time:Date});
   this.limits=make('RateLimit',{key:{type:String,unique:true},count:Number,expiresAt:Date},[[{expiresAt:1},{expireAfterSeconds:0}]]);
   this.settings=make('Setting',{key:{type:String,unique:true},value:Schema.Types.Mixed});
+  // v1 allowed one conversation per drive/request forever; rounds let a closed one be replaced by a fresh conversation.
+  await this.negotiations.collection.dropIndex('driveId_1_requestId_1').catch(()=>{});
   await Promise.all(Object.values(this).filter(v=>v && typeof v.init==='function').map(v=>v.init()));
  }
  async onModuleDestroy(){await this.connection?.close();}
