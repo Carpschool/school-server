@@ -2,13 +2,13 @@ import { Controller, Get, Post, Put, Delete, Body, Req, Param, Query, NotFoundEx
 import { ApiBearerAuth, ApiBody, ApiTags } from '@nestjs/swagger';
 import { zodToJsonSchema } from 'zod-to-json-schema';
 import { z } from 'zod';
-import { readFileSync } from 'node:fs';
-import { createPrivateKey, createPublicKey, sign } from 'node:crypto';
-import { Public, Admin, Auth } from './security.js';
+import { sign } from 'node:crypto';
+import { Public, Admin, Auth, SetupOpen } from './security.js';
 import { Database } from './database.js';
 import { SchoolService } from './school.service.js';
-import { loadConfig } from './config.js';
-import { SettingsService, settingsPatch } from './settings.js';
+import { schoolKey, schoolPublicKey } from './config.js';
+import { settingsPatch, emailRules, ruleMatches } from './settings.js';
+import { SetupService, claimDto } from './setup.js';
 import { parse, objectId, geo, commute, coordinates, proposalSchema } from './validation.js';
 const dto=(schema:z.ZodTypeAny)=>ApiBody({schema:zodToJsonSchema(schema,{$refStrategy:'none'}) as any});
 const sessionDto=z.object({ticket:z.string().min(20).max(16000)}).strict();
@@ -28,10 +28,12 @@ const report=z.object({subject:z.string().min(1).max(128),reason:z.string().min(
 @ApiTags('public')
 @Controller()
 export class PublicController {
- constructor(readonly auth:Auth,readonly service:SchoolService){}
- @Public() @Get('health') health(){return {status:'ok',schoolCode:loadConfig().SCHOOL_CODE};}
- @Public() @Get('.well-known/carpschool.json') async metadata(){const c=loadConfig();const s=await this.service.settings.get();return {schoolCode:c.SCHOOL_CODE,name:s.officialName,domains:s.domains,baseUrl:c.PUBLIC_URL,publicKey:createPublicKey(createPrivateKey(readFileSync(c.SIGNING_KEY_PATH))).export({type:'spki',format:'pem'}),campus:{name:s.campus.name,address:s.campus.address,coordinates:[s.campus.longitude,s.campus.latitude]},limits:{homes:s.limits.maxHomesPerUser,seats:s.limits.maxCarpoolStudents}};}
- @Public() @Get('federation/challenge') challenge(@Query('nonce') nonce:string){parse(z.string().regex(/^[A-Za-z0-9_-]{16,128}$/),nonce);return {signature:sign(null,Buffer.from(nonce),createPrivateKey(readFileSync(loadConfig().SIGNING_KEY_PATH))).toString('base64url')};}
+ constructor(readonly auth:Auth,readonly service:SchoolService,readonly setup:SetupService){}
+ @Public() @SetupOpen() @Get('health') async health(){const s=await this.service.settings.get();return {status:'ok',configured:s.configured,schoolCode:s.schoolCode??null};}
+ /** First-run claim from a central admin (see setup.ts). Only works while unconfigured. */
+ @Public() @SetupOpen() @Post('setup/claim') @dto(claimDto) claim(@Body() b:unknown){return this.setup.claim(parse(claimDto,b));}
+ @Public() @Get('.well-known/carpschool.json') async metadata(){const s=await this.service.settings.ready();return {schoolCode:s.schoolCode,name:s.officialName,domains:s.emailRules.filter(r=>r.type==='domain').map(r=>r.value),baseUrl:s.publicUrl,publicKey:schoolPublicKey(),campus:{name:s.campus.name,address:s.campus.address,coordinates:[s.campus.longitude,s.campus.latitude]},limits:{homes:s.limits.maxHomesPerUser,seats:s.limits.maxCarpoolStudents}};}
+ @Public() @Get('federation/challenge') challenge(@Query('nonce') nonce:string){parse(z.string().regex(/^[A-Za-z0-9_-]{16,128}$/),nonce);return {signature:sign(null,Buffer.from(nonce),schoolKey()).toString('base64url')};}
  @Public() @Post('sessions') @dto(sessionDto) exchange(@Body() b:unknown){return this.auth.exchange(parse(sessionDto,b).ticket);}
 }
 @ApiTags('onboarding') @ApiBearerAuth() @Controller()
@@ -98,8 +100,10 @@ export class AdminController {
  @Put('users/:id/ban') @dto(z.object({banned:z.boolean()}).strict()) async ban(@Param('id') id:string,@Body() b:unknown){const u=await this.db.users.findOneAndUpdate({_id:objectId(id)},{$set:parse(z.object({banned:z.boolean()}).strict(),b)},{new:true}).lean<any>();if(!u)throw new NotFoundException();return u;}
  @Get('reports') reports(){return this.db.reports.find().sort({createdAt:-1}).limit(100).lean<any>();}
  @Put('reports/:id') @dto(z.object({status:z.enum(['open','resolved','dismissed'])}).strict()) async resolve(@Param('id') id:string,@Body() b:unknown){const v=await this.db.reports.findOneAndUpdate({_id:objectId(id)},{$set:parse(z.object({status:z.enum(['open','resolved','dismissed'])}).strict(),b)},{new:true}).lean<any>();if(!v)throw new NotFoundException();return v;}
- @Get('domains') domains(){return this.service.domains();}
- @Put('domains') @dto(z.object({domains:settingsPatch.shape.domains.unwrap()}).strict()) async domainsSet(@Body() b:unknown){const v=parse(z.object({domains:settingsPatch.shape.domains.unwrap()}).strict(),b);await this.service.settings.update(v);return v;}
+ @Get('email-rules') async rules(){return (await this.service.settings.get()).emailRules;}
+ @Put('email-rules') @dto(emailRules) async rulesSet(@Body() b:unknown){return (await this.service.settings.update({emailRules:parse(emailRules,b)})).emailRules;}
+ /** Live test box: validates unsaved rules and tests one email with the exact server matcher (RE2). */
+ @Post('email-rules/test') async rulesTest(@Body() b:unknown){const v=parse(z.object({email:z.string().max(254),rules:emailRules}).strict(),b);const m=ruleMatches(v.rules,v.email);return {allowed:!!m,matched:m};}
  @Get('mailer') async mailer(){return (await this.service.settings.view()).mailer;}
  @Get('settings') settingsGet(){return this.service.settings.view();}
  @Put('settings') @dto(settingsPatch) settingsPut(@Body() b:unknown){return this.service.settings.update(parse(settingsPatch,b));}

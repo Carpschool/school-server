@@ -4,12 +4,13 @@ import { z } from 'zod';
 import { Auth } from './security.js';
 import { SchoolService } from './school.service.js';
 import { parse, idSchema, proposalSchema } from './validation.js';
-import { loadConfig } from './config.js';
+import { SettingsService } from './settings.js';
+let corsSource:SettingsService|undefined;
 const room=z.object({negotiationId:idSchema}).strict();
-@WebSocketGateway({cors:{origin:(origin:string,cb:any)=>{const allowed=loadConfig().CORS_ORIGINS.split(',').filter(Boolean);cb(null,!origin||allowed.includes(origin));},credentials:false},maxHttpBufferSize:20000})
+@WebSocketGateway({cors:{origin:(origin:string,cb:any)=>{if(!origin)return cb(null,true);if(!corsSource)return cb(null,false);corsSource.get().then(s=>cb(null,s.corsOrigins.includes(origin)),()=>cb(null,false));},credentials:false},maxHttpBufferSize:20000})
 export class ChatGateway implements OnGatewayConnection, OnGatewayInit {
  @WebSocketServer() server!:Server;
- constructor(readonly auth:Auth,readonly service:SchoolService){}
+ constructor(readonly auth:Auth,readonly service:SchoolService){corsSource=service.settings;}
  afterInit(server:Server){server.use(async(socket,next)=>{try{const token=socket.handshake.auth?.token;if(typeof token!=='string')throw new Error();const identity=await this.auth.authenticate(token);socket.data.token=token;socket.data.identity=identity;next();}catch{next(new Error('Authentication required'));}});}
  handleConnection(socket:Socket){socket.data.expiryTimer=setTimeout(()=>socket.disconnect(true),Math.max(0,socket.data.identity.expiresAt.getTime()-Date.now()));socket.on('disconnect',()=>clearTimeout(socket.data.expiryTimer));}
  async identity(socket:Socket){try{return await this.auth.authenticate(socket.data.token);}catch{socket.disconnect(true);throw new WsException('Session expired');}}

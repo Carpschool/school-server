@@ -1,23 +1,44 @@
 import { z } from 'zod';
 import 'dotenv/config';
-const positive = (fallback: number) => z.coerce.number().int().positive().default(fallback);
+import { createPrivateKey, createPublicKey, generateKeyPairSync, randomBytes, type KeyObject } from 'node:crypto';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { join, resolve } from 'node:path';
+/** The ONLY environment variables. Everything else lives in the database (see settings.ts). */
 const schema = z.object({
- NODE_ENV: z.enum(['development','production','test']).default('development'), PORT: positive(34781),
- MONGO_URI: z.string().min(1), SCHOOL_CODE: z.string().regex(/^[a-z0-9-]{2,40}$/), OFFICIAL_NAME: z.string().min(1),
- CENTRAL_URL: z.string().url(), CENTRAL_ISSUER: z.string().min(1), PUBLIC_URL: z.string().url(),
- SIGNING_KEY_PATH: z.string().min(1), OTP_PEPPER: z.string().min(32),
- ALLOWED_EMAIL_DOMAINS: z.string().min(1), MAX_HOMES_PER_USER: positive(5), MAX_USERS_PER_EDU_EMAIL: positive(1),
- MAX_CARPOOL_STUDENTS: z.coerce.number().int().min(1).max(12).default(4),
- EMAIL_PROVIDER: z.enum(['gmail','test']), GMAIL_USER: z.string().optional(), GMAIL_OAUTH_CLIENT_ID: z.string().optional(),
- GMAIL_OAUTH_CLIENT_SECRET: z.string().optional(), GMAIL_OAUTH_REFRESH_TOKEN: z.string().optional(),
- CORS_ORIGINS: z.string().default(''), CAMPUS_LATITUDE: z.coerce.number().min(-90).max(90), CAMPUS_LONGITUDE: z.coerce.number().min(-180).max(180),
+ NODE_ENV: z.enum(['development','production','test']).default('development'),
+ PORT: z.coerce.number().int().positive().default(34781),
+ MONGO_URI: z.string().min(1),
 });
 export type Config = z.infer<typeof schema>;
-export function loadConfig(): Config {
- const c = schema.parse(process.env);
- if(c.EMAIL_PROVIDER === 'test' && c.NODE_ENV !== 'test') throw new Error('Test mailer forbidden outside tests');
- if(c.EMAIL_PROVIDER === 'gmail') for(const key of ['GMAIL_USER','GMAIL_OAUTH_CLIENT_ID','GMAIL_OAUTH_CLIENT_SECRET','GMAIL_OAUTH_REFRESH_TOKEN'] as const) if(!c[key]) throw new Error('Missing '+key);
- const central = new URL(c.CENTRAL_URL);
- if(central.protocol !== 'https:' && !['localhost','127.0.0.1','central'].includes(central.hostname)) throw new Error('CENTRAL_URL requires HTTPS');
- return c;
+let cached: Config | undefined;
+export function loadConfig(): Config { return cached ??= schema.parse(process.env); }
+/** Persistent volume for secrets that must never be in env or DB: ./data relative to the working dir (Docker: /app/data). */
+let dir = resolve('data');
+export const dataDir = () => dir;
+/** Tests only. */
+export function setDataDir(d: string) { dir = d; signingKey = undefined; pepper = undefined; }
+function persisted(name: string, make: () => string) {
+ const p = join(dir, name);
+ if (!existsSync(p)) { mkdirSync(dir, { recursive: true, mode: 0o700 }); writeFileSync(p, make(), { mode: 0o600, flag: 'wx' }); }
+ return readFileSync(p, 'utf8');
+}
+let signingKey: KeyObject | undefined; let pepper: string | undefined;
+/** Ed25519 federation key, generated on first boot and kept on the volume. */
+export function schoolKey(): KeyObject {
+ if (!signingKey) {
+  const k = createPrivateKey(persisted('signing.pem', () => generateKeyPairSync('ed25519').privateKey.export({ type: 'pkcs8', format: 'pem' }) as string));
+  if (k.asymmetricKeyType !== 'ed25519') throw new Error('data/signing.pem must be an Ed25519 key');
+  signingKey = k;
+ }
+ return signingKey;
+}
+export const schoolPublicKey = () => createPublicKey(schoolKey()).export({ type: 'spki', format: 'pem' }) as string;
+export function otpPepper() { return pepper ??= persisted('otp-pepper', () => randomBytes(32).toString('base64url')).trim(); }
+/** Central/public URLs must be HTTPS; plain http only for localhost outside production. */
+export function safeOrigin(u: string) {
+ const url = new URL(u);
+ const local = ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname) || (loadConfig().NODE_ENV !== 'production' && url.hostname === 'central');
+ if (url.protocol !== 'https:' && !(url.protocol === 'http:' && local && loadConfig().NODE_ENV !== 'production')) throw new Error('HTTPS required');
+ if (url.username || url.password || url.pathname !== '/' || url.search || url.hash) throw new Error('Must be a bare origin');
+ return url.origin;
 }

@@ -16,10 +16,10 @@ export class SchoolService {
  async ready(sub:string,role?:string){const u=await this.db.users.findOne({sub}).lean<any>();if(!u||!u.verified||u.banned)throw new ForbiddenException('Verify your school email first');if(role&&u.role!==role)throw new ForbiddenException(role+' role required');return u;}
  async owner(model:any,id:string,sub:string){const doc=await model.findOne({_id:objectId(id),owner:sub}).lean();if(!doc)throw new NotFoundException();return doc;}
  async limit(key:string,max:number,seconds:number){const bucket=Math.floor(Date.now()/(seconds*1000));const r=await this.db.limits.findOneAndUpdate({key:key+':'+bucket},{$inc:{count:1},$setOnInsert:{expiresAt:new Date((bucket+2)*seconds*1000)}},{upsert:true,new:true});if(r.count>max)throw new HttpException('Try again later',429);}
- async domains(){return (await this.settings.get()).domains;}
+ async domains(){return this.settings.domains();}
  async sendOtp(sub:string,email:string,ip:string){
   const u=await this.db.users.findOne({sub}).lean<any>();if(u?.verified)throw new ConflictException('School email already verified');
-  email=email.trim().toLowerCase();const domain=email.split('@')[1];if(!(await this.domains()).includes(domain))throw new BadRequestException('School email domain not allowed');
+  email=email.trim().toLowerCase();if(!/^[^\s@]+@[^\s@]+$/.test(email)||!(await this.settings.emailAllowed(email)))throw new BadRequestException('School email domain not allowed');
   await this.limit('otp-ip:'+ip,10,3600);await this.limit('otp-sub:'+sub,5,3600);await this.limit('otp-email:'+email,5,3600);await this.limit('otp-cooldown:'+sub,1,60);
   const code=randomInt(0,1000000).toString().padStart(6,'0');
   await this.db.otps.findOneAndUpdate({sub},{$set:{email,hash:hashCode(code),attempts:0,expiresAt:new Date(Date.now()+600000)}},{upsert:true});
