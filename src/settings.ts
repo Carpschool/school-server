@@ -12,7 +12,7 @@ export function compileEmailRegex(p:string){let r=reCache.get(p);if(!r){if(p.len
 /** One allowed-email rule. Regex is matched against the FULL email, anchored ^(?:...)$, case-insensitive, via RE2 (linear time: no ReDoS). */
 export const emailRuleItem=z.discriminatedUnion('type',[
  z.object({type:z.literal('domain'),value:domain}).strict(),
- z.object({type:z.literal('regex'),value:z.string().min(1).max(200).refine(p=>{try{compileEmailRegex(p);return true;}catch{return false;}},'Invalid regular expression (RE2 syntax, no backreferences/lookaround)')}).strict(),
+ z.object({type:z.literal('regex'),value:z.string().min(1).max(200).superRefine((p,ctx)=>{try{compileEmailRegex(p);}catch(e:any){ctx.addIssue({code:z.ZodIssueCode.custom,message:'Invalid regex: '+String(e?.message||e).replace(/^error parsing regexp: /i,'').replace(/: `.*`$/,'')+' (RE2 syntax: no lookarounds or backreferences)'});}})}).strict(),
 ]);
 export const emailRules=z.array(emailRuleItem).min(1).max(50).transform(r=>r.filter((x,i)=>r.findIndex(y=>y.type===x.type&&y.value===x.value)===i));
 export function ruleMatches(rules:z.infer<typeof emailRules>,email:string){
