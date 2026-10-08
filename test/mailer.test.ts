@@ -1,7 +1,7 @@
 import 'reflect-metadata';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { Mailer } from '../dist/mailer.js';
+import { Mailer, smtpOptions } from '../dist/mailer.js';
 import { SettingsService, settingsPatch, validAppsScriptUrl } from '../dist/settings.js';
 const url='https://script.google.com/macros/s/test-deployment_123/exec';
 const relaySecret='unit-test-only-secret';
@@ -105,4 +105,26 @@ test('existing Gmail configuration now delivers through Gmail REST, never SMTP',
  const config={provider:'gmail',gmailUser:'sender@school.test',clientId:'client',clientSecret:'secret',refreshToken:'refresh',fromName:'School'};
  let calls=0;t.mock.method(globalThis,'fetch',async(input:any,init:any)=>{calls++;if(input==='https://oauth2.googleapis.com/token')return Response.json({access_token:'fake_access_token'});assert.equal(input,'https://gmail.googleapis.com/gmail/v1/users/me/messages/send');assert.equal(init.headers.Authorization,'Bearer fake_access_token');return Response.json({id:'fake-message'});});
  await relay(config).send('x@school.test','Code','text','<p>text</p>');assert.equal(calls,2);
+});
+
+
+test('SMTP UI fields validate and redact; legacy settings get compatible aliases',async()=>{
+ const m={provider:'smtp',fromName:'School',smtpHost:'smtp.test',smtpPort:587,smtpSecurity:'starttls',smtpUser:'sender',smtpPassword:'smtp-private',smtpFrom:'sender@test.edu'};
+ const parsed=settingsPatch.parse({mailer:m});const s=settings({mailer:{}});const view=await s.update(parsed);assert.equal(view.mailer.configured,true);assert.equal(view.mailer.smtpFrom,m.smtpFrom);assert.equal(view.mailer.smtpPasswordSet,true);assert(!JSON.stringify(view).includes('smtp-private'));
+ const old=await settings({mailer:{...m,smtpFrom:undefined,smtpSecurity:undefined,fromEmail:m.smtpFrom,smtpSecure:true}}).view();assert.equal(old.mailer.smtpFrom,m.smtpFrom);assert.equal(old.mailer.smtpSecurity,'tls');
+ for(const bad of ['invalid','ssl',''])assert(!settingsPatch.safeParse({mailer:{smtpSecurity:bad}}).success);
+});
+
+test('SMTP transport TLS policy and restricted content access',()=>{
+ for(const security of ['starttls','tls','none']){const o=smtpOptions({provider:'smtp',fromName:'School',smtpSecurity:security});assert.equal(o.secure,security==='tls');assert.equal(o.requireTLS,security==='starttls');assert.equal(o.ignoreTLS,security==='none');assert.equal(o.disableFileAccess,true);assert.equal(o.disableUrlAccess,true);assert.equal(o.connectionTimeout,15000);assert.equal(o.tls,undefined);}
+ assert.equal(smtpOptions({provider:'smtp',fromName:'School'}).requireTLS,true);
+ assert.equal(smtpOptions({provider:'smtp',fromName:'School',smtpSecure:true}).secure,true);
+});
+
+test('SMTP branch sends composed message and sanitizes errors without Gmail fetch',async t=>{
+ const {createHash}=await import('node:crypto');const m={provider:'smtp',fromName:'School',smtpHost:'smtp.test',smtpPort:587,smtpSecurity:'starttls',smtpUser:'sender',smtpPassword:'smtp-private',smtpFrom:'sender@test.edu'};
+ const mailer=relay(m);const key=createHash('sha256').update(JSON.stringify([m.smtpHost,m.smtpPort,m.smtpSecurity,m.smtpUser,m.smtpPassword])).digest('hex');let calls=0;mailer.transport={key,t:{sendMail:async(message:any)=>{calls++;assert.deepEqual(message.from,{name:'School',address:'sender@test.edu'});return {messageId:'test'};}} as any};
+ t.mock.method(globalThis,'fetch',async()=>{assert.fail('SMTP must not fetch Gmail');});await mailer.send('recipient@test.edu','Code','text');assert.equal(calls,1);
+ mailer.transport.t.sendMail=async()=>{throw new Error('smtp-private');};await assert.rejects(mailer.send('recipient@test.edu','Code','text'),(e:any)=>{assert.equal(e.message,'Email delivery failed. Try again later.');assert(!JSON.stringify(e).includes('smtp-private'));return true;});
+ await assert.rejects(mailer.send('recipient@test.edu','Code\r\nBcc: evil@test.edu','text'));
 });

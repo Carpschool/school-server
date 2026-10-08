@@ -17,7 +17,7 @@ let dir = resolve('data');
 export const dataDir = () => dir;
 /** Tests only. */
 export function setDataDir(d: string) { dir = d; signingKey = undefined; pepper = undefined; }
-function persisted(name: string, make: () => string) {
+export function persisted(name: string, make: () => string) {
  const p = join(dir, name);
  if (!existsSync(p)) { mkdirSync(dir, { recursive: true, mode: 0o700 }); writeFileSync(p, make(), { mode: 0o600, flag: 'wx' }); }
  return readFileSync(p, 'utf8');

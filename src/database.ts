@@ -30,7 +30,7 @@ export class Database implements OnModuleInit, OnModuleDestroy {
   this.events=make('Event',{driveId:String,rider:String,driver:String,kind:String,location:point,approximate:{type:Boolean,default:false},time:Date});
   this.limits=make('RateLimit',{key:{type:String,unique:true},count:Number,expiresAt:Date},[[{expiresAt:1},{expireAfterSeconds:0}]]);
   this.settings=make('Setting',{key:{type:String,unique:true},value:Schema.Types.Mixed});
-  this.mailerStates=make('MailerState',{key:{type:String,unique:true},keyId:String,salt:String,publicKey:String,ivCounter:Number,token:Schema.Types.Mixed,expiresAt:Date,lastPushAt:Date,lastTs:Number});
+  this.mailerStates=make('MailerState',{key:{type:String,unique:true},keyId:String,salt:String,publicKey:String,ivCounter:Number,email:String,refreshToken:Schema.Types.Mixed,pending:Schema.Types.Mixed,pendingKeyId:String,pendingSalt:String,token:Schema.Types.Mixed,expiresAt:Date,lastPushAt:Date,lastTs:Number});
   this.mailerNonces=make('MailerNonce',{keyId:String,nonce:String,expiresAt:Date},[[{keyId:1,nonce:1},{unique:true}],[{expiresAt:1},{expireAfterSeconds:0}]]);
   // v1 allowed one conversation per drive/request forever; rounds let a closed one be replaced by a fresh conversation.
   await this.negotiations.collection.dropIndex('driveId_1_requestId_1').catch(()=>{});

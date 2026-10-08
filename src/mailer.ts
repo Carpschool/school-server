@@ -1,14 +1,16 @@
 import { Injectable, Logger, ServiceUnavailableException } from '@nestjs/common';
 import { createTransport, Transporter } from 'nodemailer';
 import { createHash } from 'node:crypto';
+import { GoogleMailer } from './google-mailer.js';
 import { AppsScriptTokens } from './appsscript.js';
-import { SettingsService, validAppsScriptUrl } from './settings.js';
+import { SettingsService, validAppsScriptUrl, type Mailer as MailerSettings } from './settings.js';
+export function smtpOptions(m:MailerSettings){const security=m.smtpSecurity??(m.smtpSecure?'tls':'starttls');return {host:m.smtpHost,port:m.smtpPort,secure:security==='tls',requireTLS:security==='starttls',ignoreTLS:security==='none',auth:{user:m.smtpUser,pass:m.smtpPassword},connectionTimeout:15000,greetingTimeout:15000,socketTimeout:15000,disableFileAccess:true,disableUrlAccess:true};}
 @Injectable()
 export class Mailer {
  transport?:{key:string;t:Transporter};
  readonly logger=new Logger(Mailer.name);
  readonly testMessages:{to:string;subject:string;text:string}[]=[];
- constructor(readonly settings:SettingsService,readonly tokens?:AppsScriptTokens){}
+ constructor(readonly settings:SettingsService,readonly tokens?:AppsScriptTokens,readonly google?:GoogleMailer){}
  async send(to:string,subject:string,text:string,html?:string){
   const m=(await this.settings.get()).mailer;
   if(m.provider==='test'){this.testMessages.push({to,subject,text,...(html?{html}:{})});return;}
@@ -30,17 +32,19 @@ export class Mailer {
   }
   try{
    const name=m.fromName.replace(/["\r\n<>]/g,'');
-   const from=m.provider==='smtp'?m.fromEmail:m.gmailUser;
+   const from=m.provider==='google'?await this.google?.email():m.provider==='smtp'?(m.smtpFrom||m.fromEmail):m.gmailUser;
    if(!from||/[\r\n]/.test(from)||!/^([^\s@]+)@([^\s@]+)$/.test(to)||/[\r\n]/.test(subject))throw new Error('Invalid message');
    const message={from:{name,address:from},to,subject,text,...(html?{html}:{})};
    if(m.provider==='smtp'){
     if(!m.smtpHost||!m.smtpPort||!m.smtpUser||!m.smtpPassword)throw new Error('Missing SMTP configuration');
-    const key=createHash('sha256').update(JSON.stringify([m.smtpHost,m.smtpPort,m.smtpSecure,m.smtpUser,m.smtpPassword])).digest('hex');
-    if(this.transport?.key!==key){this.transport?.t.close();this.transport={key,t:createTransport({host:m.smtpHost,port:m.smtpPort,secure:m.smtpSecure===true,requireTLS:m.smtpSecure!==true,auth:{user:m.smtpUser,pass:m.smtpPassword},connectionTimeout:15000,greetingTimeout:15000,socketTimeout:15000,disableFileAccess:true,disableUrlAccess:true})};}
+    const security=m.smtpSecurity??(m.smtpSecure?'tls':'starttls');
+    const key=createHash('sha256').update(JSON.stringify([m.smtpHost,m.smtpPort,security,m.smtpUser,m.smtpPassword])).digest('hex');
+    if(this.transport?.key!==key){this.transport?.t.close();this.transport={key,t:createTransport(smtpOptions(m))};}
     await this.transport.t.sendMail(message);return;
    }
    let token:string;
-   if(m.provider==='appsscript_push'||(m.provider==='appsscript'&&m.appsscriptMode==='token')){
+   if(m.provider==='google'){if(!this.google)throw new Error('Google service unavailable');token=await this.google.accessToken();}
+   else if(m.provider==='appsscript_push'||(m.provider==='appsscript'&&m.appsscriptMode==='token')){
     if(!this.tokens)throw new Error('Token service unavailable');token=await this.tokens.accessToken();
    }else{
     if(!m.clientId||!m.clientSecret||!m.refreshToken)throw new Error('Missing Google configuration');
