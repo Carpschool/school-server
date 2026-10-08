@@ -1,48 +1,24 @@
+import 'reflect-metadata';
 import { NestFactory } from '@nestjs/core';
-import { ValidationPipe, Logger } from '@nestjs/common';
-import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
-import { AppModule } from './app.module';
-
-async function bootstrap() {
-  const logger = new Logger('SchoolServerBootstrap');
-  const app = await NestFactory.create(AppModule);
-
-  // Enable CORS for web client, iOS, and Android
-  app.enableCors({
-    origin: true,
-    methods: 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS',
-    credentials: true,
-    exposedHeaders: ['x-school-signature'],
-  });
-
-  // Global DTO validation with class-validator
-  app.useGlobalPipes(
-    new ValidationPipe({
-      whitelist: true,
-      transform: true,
-      forbidNonWhitelisted: true,
-    }),
-  );
-
-  // Configure Swagger OpenAPI interactive documentation
-  const config = new DocumentBuilder()
-    .setTitle('Carpschool Autonomous School Server API')
-    .setDescription(
-      'REST API documentation for School Server. Handles offline Ed25519 Federation Ticket auth, .edu email verification, corridor matching, in-chat pickup negotiations, 4-digit boarding PIN validation, and discrete GPS snapshots.',
-    )
-    .setVersion('2.0.0')
-    .addBearerAuth()
-    .build();
-
-  const document = SwaggerModule.createDocument(app, config);
-  SwaggerModule.setup('api/docs', app, document);
-
-  const port = process.env.PORT || 5000;
-  await app.listen(port);
-
-  logger.log(`🏫 School Server running on http://localhost:${port}`);
-  logger.log(`📚 Swagger API Documentation available at http://localhost:${port}/api/docs`);
-  logger.log(`🔏 Public signed metadata endpoint: http://localhost:${port}/api/v1/meta`);
+import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+import helmet from 'helmet';
+import { AppModule } from './app.js';
+import { loadConfig, schoolKey, otpPepper, dataDir } from './config.js';
+import { startHeartbeats } from './heartbeat.js';
+import { SettingsService } from './settings.js';
+async function main(){
+ const c=loadConfig();
+ schoolKey();otpPepper(); // create/verify persistent secrets on the data volume before serving
+ const app=await NestFactory.create(AppModule);
+ const settings=app.get(SettingsService);
+ app.use(helmet());
+ // CORS origins are DB settings, re-read per request (cached 5s).
+ app.enableCors((req:any,cb:any)=>{const o=req.headers.origin;if(!o)return cb(null,{origin:false});settings.get().then(s=>cb(null,{origin:s.corsOrigins.includes(o),credentials:false}),e=>cb(e));});
+ app.enableShutdownHooks();
+ const document=SwaggerModule.createDocument(app,new DocumentBuilder().setTitle('Carpschool School API').setVersion('1.0.0').addBearerAuth().build());
+ SwaggerModule.setup('docs',app,document,{jsonDocumentUrl:'/openapi.json'});
+ await app.listen(c.PORT,'0.0.0.0');
+ console.log('Data volume '+dataDir());
+ startHeartbeats(settings);
 }
-
-bootstrap();
+main().catch(error=>{console.error('School startup failed',error.message);process.exit(1);});
