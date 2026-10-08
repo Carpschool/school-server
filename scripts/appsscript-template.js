@@ -22,7 +22,7 @@ function pushToken(){
   if(typeof ivEncoded!=='string'||!/^[A-Za-z0-9_-]{16}$/.test(ivEncoded))throw new Error('Invalid reservation');
   var iv=csBytes(Utilities.base64DecodeWebSafe(ivEncoded));
   var key=csBytes(Utilities.base64DecodeWebSafe(CS_CONFIG.key));
-  var data=csUtf8(JSON.stringify({token:token,expiresAt:expiresAt,ts:ts,nonce:Utilities.getUuid().toLowerCase()}));
+  var data=csUtf8(JSON.stringify({token:token,expiresAt:expiresAt,ts:ts,nonce:reservationNonce}));
   var ciphertext=csB64(CS_AES.encrypt(key,iv,data));
   var signature=csB64(csBytes(Utilities.computeRsaSha256Signature(ciphertext+ivEncoded+String(ts),CS_CONFIG.privateKey,Utilities.Charset.UTF_8)));
   var response=UrlFetchApp.fetch(CS_CONFIG.endpoint,{method:'post',contentType:'application/json',payload:JSON.stringify({ciphertext:ciphertext,iv:ivEncoded,ts:ts,signature:signature}),muteHttpExceptions:true,followRedirects:false});

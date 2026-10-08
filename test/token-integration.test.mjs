@@ -25,7 +25,7 @@ test('real Mongo indexes, restart replay, rotation and HTTP admin guards',async(
  assert.equal((await request('/admin/mailer/appsscript/generate','POST',{},'admin')).status,409);
  const makeReservation=()=>{const r={keyId:generated.keyId,ts:Date.now(),nonce:randomUUID()};return {...r,signature:sign('RSA-SHA256',Buffer.from('carpschool-appsscript-iv:'+r.keyId+':'+r.ts+':'+r.nonce),c.privateKey).toString('base64url')};};
  const reservations=await Promise.all(Array.from({length:16},()=>tokens.reserveIv(makeReservation())));assert.equal(new Set(reservations.map(r=>r.iv)).size,16);
- const ts=Date.now(),iv=randomBytes(12),p={token:'integration_fake_token',expiresAt:ts+300000,ts,nonce:randomUUID()},cipher=createCipheriv('aes-256-gcm',Buffer.from(c.key,'base64url'),iv);
+ const reservation=makeReservation(),allocated=await tokens.reserveIv(reservation);const ts=reservation.ts,iv=Buffer.from(allocated.iv,'base64url'),p={token:'integration_fake_token',expiresAt:ts+300000,ts,nonce:reservation.nonce},cipher=createCipheriv('aes-256-gcm',Buffer.from(c.key,'base64url'),iv);
  const e={ciphertext:Buffer.concat([cipher.update(JSON.stringify(p)),cipher.final(),cipher.getAuthTag()]).toString('base64url'),iv:iv.toString('base64url'),ts};e.signature=sign('RSA-SHA256',Buffer.from(e.ciphertext+e.iv+e.ts),c.privateKey).toString('base64url');
  const results=await Promise.allSettled(Array.from({length:16},()=>tokens.accept(e)));assert.equal(results.filter(r=>r.status==='fulfilled').length,1);await assert.rejects(new AppsScriptTokens(db,settings).accept(e));
  const persisted=await db.mailerStates.findOne({key:'appsscript'}).lean();assert(!JSON.stringify(persisted).includes(p.token));assert(!persisted.privateKey);assert.equal(await tokens.accessToken(),p.token);

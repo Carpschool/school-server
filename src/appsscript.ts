@@ -45,6 +45,9 @@ export class AppsScriptTokens {
    const d=createDecipheriv('aes-256-gcm',deriveKey(s.salt),iv);d.setAuthTag(ciphertext.subarray(-16));
    const p=payload.parse(JSON.parse(Buffer.concat([d.update(ciphertext.subarray(0,-16)),d.final()]).toString('utf8')));
    if(p.ts!==e.ts||p.expiresAt<=now+30000||p.expiresAt>now+3600000||p.expiresAt<=p.ts||p.expiresAt>p.ts+3600000)throw new Error('Bad expiry');
+   const consumed=await this.db.mailerNonces.updateOne({keyId:s.keyId,nonce:'reserved-iv:'+e.iv,reservationNonce:p.nonce,reservedTs:e.ts,validUntil:{$gt:new Date(now)},consumed:false},{$set:{consumed:true}});
+   if(consumed.modifiedCount!==1)throw new Error('Missing, expired or consumed reservation');
+   await this.db.mailerNonces.create({keyId:s.keyId,nonce:'used-iv:'+e.iv});
    await this.db.mailerNonces.create({keyId:s.keyId,nonce:p.nonce,expiresAt:new Date(e.ts+600000)});
    const changed=await this.db.mailerStates.updateOne({key:'appsscript',keyId:s.keyId,$or:[{lastTs:{$exists:false}},{lastTs:{$lt:e.ts}}]},{$set:{token:sealToken(p.token,s.salt),expiresAt:new Date(p.expiresAt),lastPushAt:new Date(now),lastTs:e.ts}});
    if(changed.modifiedCount!==1)throw new Error('Rotated or old token');
@@ -58,10 +61,16 @@ export class AppsScriptTokens {
    const state=await this.state();if(!state||state.keyId!==e.keyId)throw new Error('Rotated');
    const sig=decode(e.signature);if(sig.length!==256||!verify('RSA-SHA256',Buffer.from('carpschool-appsscript-iv:'+e.keyId+':'+e.ts+':'+e.nonce,'ascii'),state.publicKey,sig))throw new Error('Bad signature');
    await this.db.mailerNonces.create({keyId:e.keyId,nonce:'iv:'+e.nonce,expiresAt:new Date(e.ts+600000)});
-   const updated=await this.db.mailerStates.findOneAndUpdate({key:'appsscript',keyId:e.keyId,ivCounter:{$lt:4294967295}},{$inc:{ivCounter:1}},{new:true}).lean<any>();
-   if(!updated)throw new Error('Exhausted or rotated');
-   const iv=Buffer.alloc(12);createHash('sha256').update(e.keyId).digest().copy(iv,0,0,8);iv.writeUInt32BE(updated.ivCounter,8);
-   return {iv:iv.toString('base64url')};
+   // Supply Node CSPRNG entropy; Apps Script UUIDs are request IDs, not IV entropy.
+   // No TTL on reservation records, so copied scripts and process restarts cannot reuse an IV.
+   for(let attempt=0;attempt<8;attempt++){
+    const iv=randomBytes(12).toString('base64url');
+    try{await this.db.mailerNonces.create({keyId:e.keyId,nonce:'reserved-iv:'+iv,reservationNonce:e.nonce,reservedTs:e.ts,validUntil:new Date(Math.min(e.ts+300000,Date.now()+300000)),consumed:false});}
+    catch(error){if((error as {code?:number}).code===11000)continue;throw error;}
+    if((await this.state())?.keyId!==e.keyId)throw new Error('Rotated');
+    return {iv};
+   }
+   throw new Error('IV allocation failed');
   }catch{throw new UnauthorizedException('Invalid IV reservation');}
  }
  async accessToken(){const s=await this.state();if(!s?.token||!s.expiresAt||s.expiresAt.getTime()<=Date.now()+30000)throw new ServiceUnavailableException('Apps Script token unavailable or expired');try{return openToken(s.token,s.salt);}catch{throw new ServiceUnavailableException('Apps Script token unavailable or expired');}}
