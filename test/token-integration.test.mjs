@@ -47,12 +47,13 @@ test('school Google broker guards, session-bound encrypted callback, refresh and
  await db.users.create({sub:'admin'});await db.sessions.create({hash:digest('admin-session'),sub:'admin',schoolAdmin:true,expiresAt:new Date(Date.now()+600000)});
  for(const path of ['/admin/mailer/google/status','/admin/mailer/google/connect','/admin/mailer/google/disconnect'])assert.equal((await nativeFetch(url+path,{method:path.endsWith('status')?'GET':'POST'})).status,401);
  await assert.rejects(settings.update({mailer:{provider:'google'}}));
- let connectId,refreshCalls=0;
+ let connectId,refreshCalls=0,revokeCalls=0,revokeFail=false;
  t.mock.method(globalThis,'fetch',async(input,init)=>{
   if(String(input).startsWith(url))return nativeFetch(input,init);
   if(String(input)==='https://central.test/mailer/google/key')return Response.json(await assertion({publicKey:brokerEncryption.publicKey.export({format:'pem',type:'spki'})},'carpschool-gmail-broker'));
   const body=JSON.parse(init.body),p=(await jwtVerify(body.assertion,createPublicKey(schoolPublicKey()),{algorithms:['EdDSA'],issuer:'sss',audience:'https://central.test'})).payload;
   if(String(input)==='https://central.test/mailer/google/connect'){assert.equal(p.returnOrigin,'https://web.test');connectId=p.connectId;return Response.json({url:'https://central.test/mailer/google/start?ticket=test'});}
+  if(String(input)==='https://central.test/mailer/google/revoke'){revokeCalls++;assert.equal(p.action,'revoke');const decrypted=(await jwtDecrypt(p.encrypted,brokerEncryption.privateKey,{keyManagementAlgorithms:['RSA-OAEP-256'],contentEncryptionAlgorithms:['A256GCM'],issuer:'sss',audience:'https://central.test'})).payload;assert.equal(decrypted.refreshToken,'fake_google_refresh_token');assert.equal(decrypted.requestId,p.jti);if(revokeFail)return Response.json({error:'secret must not escape'},{status:503});return Response.json(await assertion({requestId:p.jti,revoked:true}));}
   assert.equal(String(input),'https://central.test/mailer/google/refresh');refreshCalls++;const decrypted=(await jwtDecrypt(p.encrypted,brokerEncryption.privateKey,{keyManagementAlgorithms:['RSA-OAEP-256'],contentEncryptionAlgorithms:['A256GCM'],issuer:'sss',audience:'https://central.test'})).payload;assert.equal(decrypted.refreshToken,'fake_google_refresh_token');assert.equal(decrypted.requestId,p.jti);
   return Response.json(await bundle({requestId:p.jti,accessToken:'fake_google_refreshed_token',expiresAt:Date.now()+300000}));
  });
@@ -60,7 +61,7 @@ test('school Google broker guards, session-bound encrypted callback, refresh and
  const b=await bundle({connectId,accessToken:'fake_google_access_token',refreshToken:'fake_google_refresh_token',email:'sender@test.edu',expiresAt:Date.now()+300000});await google.callback(b);await assert.rejects(google.callback(b));
  assert.equal((await google.status()).connected,true);const state=await db.mailerStates.findOne({key:'google'}).lean();assert(!JSON.stringify(state).includes('fake_google'));await settings.update({mailer:{provider:'google'}});assert.equal((await settings.view()).mailer.configured,true);assert.equal(await google.email(),'sender@test.edu');assert.equal(await google.accessToken(),'fake_google_access_token');
  await db.mailerStates.updateOne({key:'google'},{$set:{expiresAt:new Date(Date.now()-1000)}});assert.equal(await google.accessToken(),'fake_google_refreshed_token');assert.equal(refreshCalls,1);
- await google.disconnect();assert.equal((await google.status()).connected,false);await assert.rejects(google.accessToken());
+ revokeFail=true;await assert.rejects(google.disconnect(),/Google mailer disconnect failed/);assert.equal((await google.status()).connected,true);revokeFail=false;await google.disconnect();assert.equal(revokeCalls,2);await google.disconnect();assert.equal(revokeCalls,2);assert.equal((await google.status()).connected,false);await assert.rejects(google.accessToken());
  await google.connect(req);await db.sessions.deleteOne({hash:digest('admin-session')});await assert.rejects(google.callback(await bundle({connectId,accessToken:'fake_google_access_token',refreshToken:'fake_google_refresh_token',email:'sender@test.edu',expiresAt:Date.now()+300000})));assert.equal((await google.status()).connected,false);
  }finally{await db.connection.dropDatabase();await app.close();}
 });

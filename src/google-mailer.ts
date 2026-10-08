@@ -41,7 +41,16 @@ export class GoogleMailer {
   }catch{throw new UnauthorizedException('Invalid Google mailer callback');}
  }
  async status(){const s=await this.db.mailerStates.findOne({key:'google'}).lean<any>();return {connected:!!s?.refreshToken,email:s?.email??null,expiresAt:s?.expiresAt?.toISOString()??null};}
- async disconnect(){await this.db.mailerStates.deleteOne({key:'google'});return {ok:true};}
+ async disconnect(){
+  const state=await this.db.mailerStates.findOne({key:'google'}).lean<any>();
+  if(!state?.refreshToken){await this.db.mailerStates.deleteOne({key:'google',refreshToken:{$exists:false}});return {ok:true};}
+  try{
+   const s=await this.settings.ready(),keyAssertion=await this.verifyAssertion(await this.central('/mailer/google/key'),'carpschool-gmail-broker');if(typeof keyAssertion.publicKey!=='string')throw new Error();
+   const requestId=randomUUID(),encrypted=await new EncryptJWT({refreshToken:openToken(state.refreshToken,state.salt),requestId}).setProtectedHeader({alg:'RSA-OAEP-256',enc:'A256GCM',typ:'JWT'}).setIssuer(s.schoolCode).setAudience(s.centralUrl).setIssuedAt().setExpirationTime('5m').setJti(requestId).encrypt(createPublicKey(keyAssertion.publicKey));
+   const ack=await this.verifyAssertion(await this.central('/mailer/google/revoke',await this.signed('revoke',{encrypted},requestId)),s.schoolCode);if(ack.requestId!==requestId||ack.revoked!==true)throw new Error();
+   await this.db.mailerStates.deleteOne({key:'google',keyId:state.keyId});return {ok:true};
+  }catch{throw new ServiceUnavailableException('Google mailer disconnect failed');}
+ }
  async email(){const s=await this.db.mailerStates.findOne({key:'google'}).lean<any>();if(!s?.email||!s.refreshToken)throw new ServiceUnavailableException('Google mailer not connected');return s.email as string;}
  async accessToken(){const s=await this.db.mailerStates.findOne({key:'google'}).lean<any>();if(!s?.refreshToken)throw new ServiceUnavailableException('Google mailer not connected');if(s.token&&s.expiresAt?.getTime()>Date.now()+60000)return openToken(s.token,s.salt);if(!this.refreshing)this.refreshing=this.refresh(s).finally(()=>{this.refreshing=undefined;});return this.refreshing;}
  private async refresh(state:any){
