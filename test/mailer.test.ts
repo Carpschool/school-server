@@ -1,0 +1,110 @@
+import 'reflect-metadata';
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { Mailer } from '../dist/mailer.js';
+import { SettingsService, settingsPatch, validAppsScriptUrl } from '../dist/settings.js';
+const url='https://script.google.com/macros/s/test-deployment_123/exec';
+const relaySecret='unit-test-only-secret';
+function settings(initial:any){
+ let value=structuredClone(initial);
+ const db:any={settings:{findOne:()=>({lean:async()=>({value})}),updateOne:async(_:any,update:any)=>{value=structuredClone(update.$set.value);}}};
+ return new SettingsService(db);
+}
+function relay(config:any={provider:'appsscript',url,secret:relaySecret}){return new Mailer(settings({mailer:config}));}
+
+test('Apps Script config allows only exact deployed Google HTTPS URLs',()=>{
+ assert(settingsPatch.safeParse({mailer:{provider:'appsscript',url,secret:relaySecret}}).success);
+ for(const bad of ['http://script.google.com/macros/s/x/exec','https://evil.test/macros/s/x/exec','https://script.google.com.evil.test/macros/s/x/exec','https://user@script.google.com/macros/s/x/exec','https://script.google.com:8443/macros/s/x/exec','https://script.google.com/macros/s/x/dev',url+'?next=http://127.0.0.1',url+'#fragment','https://script.google.com/macros/s/../exec','https://script.google.com/macros/s/%2F/exec',url+'/']){
+  assert.equal(validAppsScriptUrl(bad),false,bad);
+  assert.equal(settingsPatch.safeParse({mailer:{url:bad}}).success,false,bad);
+ }
+ assert.equal(settingsPatch.safeParse({mailer:{secret:''}}).success,false);
+ assert(settingsPatch.safeParse({mailer:{secret:null}}).success);
+});
+
+test('Apps Script settings persist and keep secrets write-only',async()=>{
+ const s=settings({mailer:{provider:'gmail',fromName:'School',clientSecret:'gmail-client',refreshToken:'gmail-refresh'}});
+ const view=await s.update(settingsPatch.parse({mailer:{provider:'appsscript',url,secret:relaySecret}}));
+ assert.equal(view.mailer.configured,true);assert.equal(view.mailer.secretSet,true);assert.equal(view.mailer.url,url);
+ for(const hidden of [relaySecret,'gmail-client','gmail-refresh'])assert.equal(JSON.stringify(view).includes(hidden),false);
+ assert.equal((await s.get()).mailer.secret,relaySecret);
+ const unchanged=await s.update({mailer:{fromName:'New name'}});assert.equal(unchanged.mailer.secretSet,true);
+ const cleared=await s.update(settingsPatch.parse({mailer:{secret:null}}));assert.equal(cleared.mailer.secretSet,false);assert.equal(cleared.mailer.configured,false);
+});
+
+test('configured status is provider-specific',async()=>{
+ assert.equal((await settings({mailer:{provider:'appsscript',url}}).view()).mailer.configured,false);
+ assert.equal((await settings({mailer:{provider:'appsscript',url:'https://evil.test',secret:relaySecret}}).view()).mailer.configured,false);
+ assert.equal((await settings({mailer:{provider:'gmail',url,secret:relaySecret}}).view()).mailer.configured,false);
+ assert.equal((await settings({mailer:{provider:'gmail',gmailUser:'sender@school.test',clientId:'client',clientSecret:'secret',refreshToken:'refresh'}}).view()).mailer.configured,true);
+ assert.equal((await settings({mailer:{provider:'test'}}).view()).mailer.configured,true);
+});
+
+test('Apps Script posts JSON, follows response redirects and uses a deadline',async t=>{
+ let calls=0;
+ t.mock.method(globalThis,'fetch',async (input:any,init:any)=>{
+  calls++;assert.equal(input,url);assert.equal(init.method,'POST');assert.equal(init.redirect,'follow');assert.deepEqual(init.headers,{'Content-Type':'application/json'});
+  assert(init.signal instanceof AbortSignal);assert.equal(init.signal.aborted,false);
+  assert.deepEqual(JSON.parse(init.body),{secret:relaySecret,to:'student@school.test',subject:'Code',text:'123456',html:'<p>123456</p>'});
+  return Response.json({ok:true});
+ });
+ await relay().send('student@school.test','Code','123456','<p>123456</p>');assert.equal(calls,1);
+});
+
+test('plain text relay messages include empty optional HTML',async t=>{
+ t.mock.method(globalThis,'fetch',async (_:any,init:any)=>{assert.equal(JSON.parse(init.body).html,'');return Response.json({ok:true});});
+ await relay().send('student@school.test','Code','123456');
+});
+
+test('invalid or incomplete stored relay configuration never fetches',async t=>{
+ t.mock.method(globalThis,'fetch',async()=>{assert.fail('must not fetch');});
+ for(const config of [{provider:'appsscript',url},{provider:'appsscript',secret:relaySecret},{provider:'appsscript',url:'http://127.0.0.1/',secret:relaySecret}]){
+  await assert.rejects(relay(config).send('x@school.test','Code','text'),/Mailer not configured/);
+ }
+});
+
+test('HTTP, malformed JSON, rejected JSON, network and timeout failures are sanitized without retries',async t=>{
+ const failures=[()=>new Response(relaySecret,{status:403}),()=>new Response('<html>sign in '+relaySecret+'</html>'),()=>Response.json({ok:false,error:relaySecret}),()=>Response.json({ok:'true'}),()=>Response.json(null),()=>Response.json({}),()=>{throw new Error(relaySecret);},()=>{throw new DOMException(relaySecret,'TimeoutError');}];
+ for(const failure of failures){
+  let calls=0;const mock=t.mock.method(globalThis,'fetch',async()=>{calls++;return failure();});
+  await assert.rejects(relay().send('x@school.test','Code','text'),(e:any)=>{assert.equal(e.getStatus(),503);assert.equal(e.message,'Email delivery failed. Try again later.');assert.equal(JSON.stringify(e).includes(relaySecret),false);return true;});
+  assert.equal(calls,1);mock.mock.restore();
+ }
+});
+
+test('response read failures share the sanitized delivery error',async t=>{
+ t.mock.method(globalThis,'fetch',async()=>({ok:true,json:async()=>{throw new DOMException(relaySecret,'AbortError');}}));
+ await assert.rejects(relay().send('x@school.test','Code','text'),/Email delivery failed/);
+});
+
+test('ride notification failure logs only fixed text',async t=>{
+ const m=relay();let logged='';t.mock.method(globalThis,'fetch',async()=>{throw new Error(relaySecret);});
+ t.mock.method(m.logger,'error',(message:any)=>{logged=message;});
+ await m.notify('x@school.test','Ride','text');assert.equal(logged,'Ride notification delivery failed');
+});
+
+test('test provider remains local and does not call fetch',async t=>{
+ t.mock.method(globalThis,'fetch',async()=>{assert.fail('must not fetch');});
+ const m=relay({provider:'test'});await m.send('x@school.test','Code','text');
+ assert.deepEqual(m.testMessages,[{to:'x@school.test',subject:'Code',text:'text'}]);
+});
+
+test('Apps Script deadline aborts an unresponsive fetch',async t=>{
+ // Shorten the native timeout for this test, while asserting the production deadline.
+ const nativeTimeout=AbortSignal.timeout.bind(AbortSignal);
+ t.mock.method(AbortSignal,'timeout',(milliseconds:number)=>{assert.equal(milliseconds,15000);return nativeTimeout(10);});
+ t.mock.method(globalThis,'fetch',async (_:any,init:any)=>new Promise((_,reject)=>{
+  // Keep the test event loop alive; native timeout timers are intentionally unref'd.
+  const keepAlive=setTimeout(()=>reject(new Error('test hung')),1000);
+  init.signal.addEventListener('abort',()=>{clearTimeout(keepAlive);reject(init.signal.reason);},{once:true});
+ }));
+ await assert.rejects(relay().send('x@school.test','Code','text'),/Email delivery failed/);
+});
+
+test('existing Gmail transport still sends text and optional HTML',async()=>{
+ const config={provider:'gmail',gmailUser:'sender@school.test',clientId:'client',clientSecret:'secret',refreshToken:'refresh',fromName:'School'};
+ const m=relay(config);const {createHash}=await import('node:crypto');let message:any;
+ m.transport={key:createHash('sha256').update(JSON.stringify([config.gmailUser,config.clientId,config.clientSecret,config.refreshToken])).digest('hex'),t:{sendMail:async(v:any)=>{message=v;}} as any};
+ await m.send('x@school.test','Code','text','<p>text</p>');
+ assert.deepEqual(message,{from:{name:'School',address:config.gmailUser},to:'x@school.test',subject:'Code',text:'text',html:'<p>text</p>'});
+});
