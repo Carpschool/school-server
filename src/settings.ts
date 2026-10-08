@@ -33,9 +33,9 @@ export const settingsPatch=z.object({
  publicUrl:origin,
  corsOrigins:z.array(origin).max(20).transform(d=>[...new Set(d)]),
  campus, emailRules, limits,
- mailer:z.object({provider:z.enum(['gmail','appsscript','test']),url:appsScriptUrl,secret:secret.nullable(),gmailUser:z.string().trim().email().max(254),fromName:z.string().trim().max(80),clientId:secret,clientSecret:secret.nullable(),refreshToken:secret.nullable()}).partial().strict(),
+ mailer:z.object({provider:z.enum(['smtp','gmail','appsscript','appsscript_push','test']),appsscriptMode:z.enum(['relay','token']),smtpHost:z.string().trim().min(1).max(253).regex(/^[A-Za-z0-9.-]+$/),smtpPort:z.number().int().min(1).max(65535),smtpSecure:z.boolean(),smtpUser:secret,smtpPassword:secret.nullable(),fromEmail:z.string().trim().email().max(254),url:appsScriptUrl,secret:secret.nullable(),gmailUser:z.string().trim().email().max(254),fromName:z.string().trim().max(80),clientId:secret,clientSecret:secret.nullable(),refreshToken:secret.nullable()}).partial().strict(),
 }).partial().strict();
-export type Mailer={provider:'gmail'|'appsscript'|'test';url?:string;secret?:string;gmailUser?:string;fromName:string;clientId?:string;clientSecret?:string;refreshToken?:string};
+export type Mailer={provider:'smtp'|'gmail'|'appsscript'|'appsscript_push'|'test';appsscriptMode?:'relay'|'token';smtpHost?:string;smtpPort?:number;smtpSecure?:boolean;smtpUser?:string;smtpPassword?:string;fromEmail?:string;url?:string;secret?:string;gmailUser?:string;fromName:string;clientId?:string;clientSecret?:string;refreshToken?:string};
 export type SchoolSettings={configured:boolean;schoolCode?:string;centralUrl?:string;officialName:string;publicUrl?:string;corsOrigins:string[];campus:z.infer<typeof campus>;emailRules:z.infer<typeof emailRules>;limits:z.infer<typeof limits>;mailer:Mailer};
 export type Configured=SchoolSettings&{configured:true;schoolCode:string;centralUrl:string};
 const BLANK:SchoolSettings={configured:false,officialName:'Unconfigured school',corsOrigins:[],campus:{name:'Campus',address:'',latitude:0,longitude:0},emailRules:[],limits:{maxCarpoolStudents:4,maxHomesPerUser:3,maxUsersPerEduEmail:1},mailer:{provider:'gmail',fromName:'Carpschool'}};
@@ -56,14 +56,14 @@ export class SettingsService {
  /** Plain domain rules only (regex rules are never published). */
  async domains(){return (await this.get()).emailRules.filter(r=>r.type==='domain').map(r=>r.value);}
  /** Safe view: mailer secrets are write-only. */
- async view(){const s=await this.get();const {clientSecret,refreshToken,secret,...m}=s.mailer;return {...s,mailer:{...m,clientSecretSet:!!clientSecret,refreshTokenSet:!!refreshToken,secretSet:!!secret,configured:m.provider==='test'||(m.provider==='appsscript'?!!(m.url&&validAppsScriptUrl(m.url)&&secret):!!(m.gmailUser&&m.clientId&&clientSecret&&refreshToken))}};}
+ async view(){const s=await this.get();const {clientSecret,refreshToken,secret,smtpPassword,...m}=s.mailer;return {...s,mailer:{...m,clientSecretSet:!!clientSecret,refreshTokenSet:!!refreshToken,secretSet:!!secret,smtpPasswordSet:!!smtpPassword,configured:m.provider==='test'||(m.provider==='smtp'?!!(m.smtpHost&&m.smtpPort&&m.smtpUser&&smtpPassword&&m.fromEmail):(m.provider==='appsscript'||m.provider==='appsscript_push')?((m.provider==='appsscript_push'||m.appsscriptMode==='token')?!!(m.gmailUser&&await this.db.mailerStates.exists({key:'appsscript',token:{$exists:true},expiresAt:{$gt:new Date(Date.now()+30000)}})):!!(m.url&&validAppsScriptUrl(m.url)&&secret)):!!(m.gmailUser&&m.clientId&&clientSecret&&refreshToken))}};}
  async write(next:any){await this.db.settings.updateOne({key:'school'},{$set:{value:next}},{upsert:true});this.cache=undefined;}
  async update(patch:{[K in keyof z.output<typeof settingsPatch>]?:any}){
   const cur=(await this.db.settings.findOne({key:'school'}).lean<any>())?.value||{};const next:any={...cur};
   for(const k of ['officialName','publicUrl','corsOrigins','campus','emailRules','limits'] as const)if(patch[k]!==undefined)next[k]=patch[k];
   if(patch.mailer){
    if(patch.mailer.provider==='test'&&loadConfig().NODE_ENV==='production')throw new BadRequestException('Test mailer is not allowed in production');
-   const m={...(cur.mailer||{})};for(const [k,val] of Object.entries(patch.mailer)){if(val===null)delete m[k];else m[k]=val;}next.mailer=m;
+   const m={...(cur.mailer||{})};for(const [k,val] of Object.entries(patch.mailer)){if(val===null)delete m[k];else m[k]=val;}if((m.provider==='appsscript_push'||(m.provider==='appsscript'&&m.appsscriptMode==='token'))&&!await this.db.mailerStates.exists({key:'appsscript',token:{$exists:true},expiresAt:{$gt:new Date(Date.now()+30000)}}))throw new BadRequestException('Confirm a valid Apps Script token before switching');next.mailer=m;
   }
   await this.write(next);return this.view();
  }

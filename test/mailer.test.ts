@@ -101,10 +101,8 @@ test('Apps Script deadline aborts an unresponsive fetch',async t=>{
  await assert.rejects(relay().send('x@school.test','Code','text'),/Email delivery failed/);
 });
 
-test('existing Gmail transport still sends text and optional HTML',async()=>{
+test('existing Gmail configuration now delivers through Gmail REST, never SMTP',async t=>{
  const config={provider:'gmail',gmailUser:'sender@school.test',clientId:'client',clientSecret:'secret',refreshToken:'refresh',fromName:'School'};
- const m=relay(config);const {createHash}=await import('node:crypto');let message:any;
- m.transport={key:createHash('sha256').update(JSON.stringify([config.gmailUser,config.clientId,config.clientSecret,config.refreshToken])).digest('hex'),t:{sendMail:async(v:any)=>{message=v;}} as any};
- await m.send('x@school.test','Code','text','<p>text</p>');
- assert.deepEqual(message,{from:{name:'School',address:config.gmailUser},to:'x@school.test',subject:'Code',text:'text',html:'<p>text</p>'});
+ let calls=0;t.mock.method(globalThis,'fetch',async(input:any,init:any)=>{calls++;if(input==='https://oauth2.googleapis.com/token')return Response.json({access_token:'fake_access_token'});assert.equal(input,'https://gmail.googleapis.com/gmail/v1/users/me/messages/send');assert.equal(init.headers.Authorization,'Bearer fake_access_token');return Response.json({id:'fake-message'});});
+ await relay(config).send('x@school.test','Code','text','<p>text</p>');assert.equal(calls,2);
 });

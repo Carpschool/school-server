@@ -1,9 +1,10 @@
-import { Controller, Get, Post, Put, Delete, Body, Req, Param, Query, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Controller, Get, Post, Put, Delete, Body, Req, Param, Query, NotFoundException, BadRequestException, Header } from '@nestjs/common';
 import { ApiBearerAuth, ApiBody, ApiTags } from '@nestjs/swagger';
 import { zodToJsonSchema } from 'zod-to-json-schema';
 import { z } from 'zod';
 import { sign } from 'node:crypto';
 import { Public, Admin, Auth, SetupOpen } from './security.js';
+import { AppsScriptTokens } from './appsscript.js';
 import { Database } from './database.js';
 import { SchoolService } from './school.service.js';
 import { schoolKey, schoolPublicKey } from './config.js';
@@ -95,7 +96,7 @@ export class SafetyController {
 }
 @ApiTags('admin') @ApiBearerAuth() @Admin() @Controller('admin')
 export class AdminController {
- constructor(readonly db:Database,readonly service:SchoolService){}
+ constructor(readonly db:Database,readonly service:SchoolService,readonly tokens:AppsScriptTokens){}
  @Get('users') users(){return this.db.users.find().sort({createdAt:-1}).limit(100).lean<any>();}
  /** One student's full record at this school (profile + their data). */
  @Get('users/:id') async user(@Param('id') id:string){const u=await this.db.users.findOne({_id:objectId(id)}).lean<any>();if(!u)throw new NotFoundException();const s=u.sub;
@@ -108,7 +109,16 @@ export class AdminController {
  @Put('email-rules') @dto(emailRules) async rulesSet(@Body() b:unknown){return (await this.service.settings.update({emailRules:parse(emailRules,b)})).emailRules;}
  /** Live test box: validates unsaved rules and tests one email with the exact server matcher (RE2). */
  @Post('email-rules/test') async rulesTest(@Body() b:unknown){const v=parse(z.object({email:z.string().max(254),rules:emailRules}).strict(),b);const m=ruleMatches(v.rules,v.email);return {allowed:!!m,matched:m};}
+ @Post('mailer/appsscript/generate') @Header('Cache-Control','no-store') generateScript(@Body() b:unknown){const v=parse(z.object({regenerate:z.boolean().optional()}).strict(),b);return this.tokens.generate(v.regenerate===true);}
+ @Get('mailer/appsscript/status') @Header('Cache-Control','no-store') tokenStatus(){return this.tokens.status();}
  @Get('mailer') async mailer(){return (await this.service.settings.view()).mailer;}
  @Get('settings') settingsGet(){return this.service.settings.view();}
  @Put('settings') @dto(settingsPatch) settingsPut(@Body() b:unknown){return this.service.settings.update(parse(settingsPatch,b));}
+}
+
+@Controller('mailer/appsscript')
+export class MailerTokenController {
+ constructor(readonly tokens:AppsScriptTokens){}
+ @Public() @Post('iv') @Header('Cache-Control','no-store') reserveIv(@Body() b:unknown){return this.tokens.reserveIv(b);}
+ @Public() @Post('token') @Header('Cache-Control','no-store') token(@Body() b:unknown){return this.tokens.accept(b);}
 }

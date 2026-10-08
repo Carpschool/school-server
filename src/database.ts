@@ -6,7 +6,7 @@ const point = {type: {type: String, enum:['Point'], default:'Point'}, coordinate
 export class Database implements OnModuleInit, OnModuleDestroy {
  connection!: Connection;
  users!: Model<any>; sessions!: Model<any>; replays!: Model<any>; otps!: Model<any>; emails!: Model<any>;
- homes!: Model<any>; requests!: Model<any>; drives!: Model<any>; negotiations!: Model<any>; messages!: Model<any>; proposals!: Model<any>; reports!: Model<any>; blocks!: Model<any>; events!: Model<any>; limits!: Model<any>; settings!: Model<any>;
+ homes!: Model<any>; requests!: Model<any>; drives!: Model<any>; negotiations!: Model<any>; messages!: Model<any>; proposals!: Model<any>; reports!: Model<any>; blocks!: Model<any>; events!: Model<any>; limits!: Model<any>; settings!: Model<any>; mailerStates!: Model<any>; mailerNonces!: Model<any>;
  async onModuleInit() {
   this.connection = await createConnection(loadConfig().MONGO_URI).asPromise();
   const make = (name: string, fields: any, indexes: any[] = []) => {
@@ -30,6 +30,8 @@ export class Database implements OnModuleInit, OnModuleDestroy {
   this.events=make('Event',{driveId:String,rider:String,driver:String,kind:String,location:point,approximate:{type:Boolean,default:false},time:Date});
   this.limits=make('RateLimit',{key:{type:String,unique:true},count:Number,expiresAt:Date},[[{expiresAt:1},{expireAfterSeconds:0}]]);
   this.settings=make('Setting',{key:{type:String,unique:true},value:Schema.Types.Mixed});
+  this.mailerStates=make('MailerState',{key:{type:String,unique:true},keyId:String,salt:String,publicKey:String,ivCounter:Number,token:Schema.Types.Mixed,expiresAt:Date,lastPushAt:Date,lastTs:Number});
+  this.mailerNonces=make('MailerNonce',{keyId:String,nonce:String,expiresAt:Date},[[{keyId:1,nonce:1},{unique:true}],[{expiresAt:1},{expireAfterSeconds:0}]]);
   // v1 allowed one conversation per drive/request forever; rounds let a closed one be replaced by a fresh conversation.
   await this.negotiations.collection.dropIndex('driveId_1_requestId_1').catch(()=>{});
   await Promise.all(Object.values(this).filter(v=>v && typeof v.init==='function').map(v=>v.init()));
