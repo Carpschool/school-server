@@ -1,0 +1,2 @@
+import { generateKeyPairSync } from "node:crypto";
+function main() { const keys = try generateKeyPairSync("ed25519"); console.log(keys); }
